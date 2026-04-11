@@ -1,0 +1,101 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
+
+@import "tailwindcss";
+
+@theme {
+  /* Brand Colors */
+  --color-primary: #003ec7;
+  --color-primary-container: #0052ff;
+  --color-primary-fixed: #dde1ff;
+  --color-primary-fixed-dim: #b7c4ff;
+
+  --color-secondary: #515f74;
+  --color-secondary-container: #d5e3fc;
+
+  --color-tertiary: #620bd3;
+  --color-tertiary-container: #7b39ec;
+  --color-tertiary-fixed: #eaddff;
+
+  --color-surface: #f8fafc; /* Very light slate-50 equivalent */
+  --color-surface-bright: #ffffff;
+  --color-surface-dim: #f1f5f9;
+  
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f8fafc;
+  --color-surface-container: #f1f5f9;
+  --color-surface-container-high: #e2e8f0;
+  --color-surface-container-highest: #cbd5e1;
+
+  --color-navy: #0A192F;
+  --color-navy-light: #112240;
+  --color-navy-lighter: #233554;
+
+  --color-error: #ef4444;
+  --color-error-container: #fee2e2;
+
+  --color-on-surface: #0f172a;
+  --color-on-surface-variant: #64748b;
+
+  /* Typography */
+  --font-manrope: "Manrope", sans-serif;
+  --font-inter: "Inter", sans-serif;
+
+  /* Border Radius */
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-3xl: 1.5rem;
+
+  /* Animations */
+  --animate-pulse-slow: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+:root {
+  font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  background-color: #f8fafc;
+  color: #0f172a;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#root {
+  width: 100%;
+}
+
+.font-manrope { font-family: 'Manrope', sans-serif; }
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.ai-gradient-bg {
+  background: linear-gradient(135deg, #003ec7 0%, #0052ff 100%);
+}
+
+.ai-glow {
+  box-shadow: 0 0 20px rgba(98, 11, 211, 0.15);
+}
+
+.material-symbols-outlined {
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
+  vertical-align: middle;
+}
