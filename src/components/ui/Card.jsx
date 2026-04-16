@@ -44,17 +44,17 @@ export const Card = ({
       )}
       {beam && (
         <div 
-          className="absolute inset-0 pointer-events-none"
+          className="absolute inset-0 pointer-events-none z-0"
           style={{
             maskImage: 'linear-gradient(black, black), linear-gradient(black, black)',
             maskClip: 'content-box, border-box',
             maskComposite: 'exclude',
             WebkitMaskComposite: 'destination-out',
-            padding: '1.5px', // Border width
+            padding: '2px', 
           }}
         >
           <div 
-            className="absolute bg-gradient-to-r from-transparent via-blue-400 to-transparent w-40 h-[1.5px] animate-border-beam"
+            className="absolute bg-blue-400/60 w-12 h-12 rounded-full blur-[20px] animate-border-beam"
             style={{
               offsetPath: 'rect(0 0 100% 100% round 2.5rem)',
               offsetRotate: 'auto',
