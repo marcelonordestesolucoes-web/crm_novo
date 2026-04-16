@@ -1,13 +1,13 @@
 import React from 'react';
 import { Mail, Phone, MoreVertical, MessageSquare } from 'lucide-react';
-import { mockContacts } from '@/data/mockData';
 import { Card, Button, PageHeader, SearchBar, LoadingSpinner, ErrorMessage, Avatar } from '@/components/ui';
 import { useSearch } from '@/hooks/useSearch';
 import { useSupabase } from '@/hooks/useSupabase';
 import { getContacts } from '@/services/contacts';
+import { cn } from '@/lib/utils';
 
 const ContactCard = ({ contact }) => (
-  <Card variant="glass" className="p-8 group relative overflow-hidden flex flex-col h-full">
+  <Card variant="glass" className="p-8 group relative overflow-hidden flex flex-col h-full ring-1 ring-blue-500/5 transition-all duration-500 hover:-translate-y-1 hover:shadow-[0_30px_60px_rgba(0,0,0,0.06)]">
     <div className="absolute inset-0 bg-gradient-to-br from-primary/0 to-primary/[0.02] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
     
     {/* Options on top */}
@@ -77,25 +77,28 @@ const ContactRow = ({ icon, label }) => (
 
 export default function Contacts() {
   const { data, loading, error, refetch } = useSupabase(getContacts);
-  const contacts = data?.length ? data : mockContacts;
+  const contacts = data || [];
   const { query, setQuery, filtered } = useSearch(contacts, ['name', 'role', 'company', 'email']);
 
   return (
-    <div className="animate-in fade-in duration-700 max-w-7xl mx-auto w-full">
+    <div className="animate-in fade-in duration-700 max-w-7xl mx-auto w-full relative -mt-10 z-10">
+      {/* Aurora Spotlight — Profundidade no Diretório */}
+      <div className="absolute -top-20 left-1/3 w-[800px] h-[400px] bg-blue-400/[0.05] blur-[120px] rounded-full pointer-events-none -z-10" />
+
       <PageHeader
         title="Stakeholders Chave"
         subtitle="Diretório de tomadores de decisão e influenciadores estratégicos."
         actions={<Button icon="person_add">Novo Contato</Button>}
       />
 
-      <div className="flex items-center gap-4 bg-white/20 backdrop-blur-md p-3 rounded-[2rem] border border-white/40 mb-10 shadow-sm max-w-2xl">
+      <div className="flex items-center gap-4 bg-white/70 backdrop-blur-2xl p-3 rounded-[2rem] border border-white/40 mb-10 shadow-[0_10px_40px_rgba(0,0,0,0.05)] max-w-2xl ring-1 ring-blue-500/10 hover:shadow-lg transition-all duration-500">
         <SearchBar
           placeholder="Buscar por nome, cargo ou empresa..."
           value={query}
           onChange={setQuery}
           className="bg-transparent border-0 shadow-none focus-within:ring-0 flex-1"
         />
-        <button className="w-12 h-12 rounded-2xl border border-white/60 bg-white/40 hover:bg-white text-slate-400 hover:text-primary transition-all flex items-center justify-center shadow-sm">
+        <button className="w-12 h-12 rounded-2xl border border-white/60 bg-white/50 hover:bg-white text-slate-400 hover:text-primary transition-all flex items-center justify-center shadow-sm active:scale-95">
           <span className="material-symbols-outlined">filter_list</span>
         </button>
       </div>
@@ -104,10 +107,20 @@ export default function Contacts() {
       {error   && <ErrorMessage message={error} onRetry={refetch} />}
 
       {!loading && !error && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filtered.map((contact) => (
-            <ContactCard key={contact.id} contact={contact} />
-          ))}
+        <div className={cn("grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6", filtered.length === 0 && "grid-cols-1")}>
+          {filtered.length > 0 ? (
+            filtered.map((contact) => (
+              <ContactCard key={contact.id} contact={contact} />
+            ))
+          ) : (
+            <div className="text-center py-20 text-on-surface-variant font-inter col-span-full">
+              {query ? (
+                <>Nenhum contato encontrado para "<span className="font-bold">{query}</span>".</>
+              ) : (
+                <>Sua lista de stakeholders está vazia. Comece adicionando influenciadores estratégicos.</>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

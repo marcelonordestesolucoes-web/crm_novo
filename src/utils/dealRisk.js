@@ -16,7 +16,7 @@
  * @returns {Object|null} - { score, risk } or null if no data.
  */
 export const calculateDealRisk = (qualification) => {
-  if (!qualification || Object.keys(qualification).length === 0) return null;
+  if (!qualification || Object.keys(qualification).length === 0) return { score: 0, risk: 'low' };
 
   let score = 0;
 

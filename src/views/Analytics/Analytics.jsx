@@ -78,12 +78,15 @@ export default function Analytics() {
   });
 
   return (
-    <div className="animate-in fade-in duration-700 max-w-7xl mx-auto w-full">
+    <div className="animate-in fade-in duration-700 max-w-7xl mx-auto w-full relative -mt-10 z-10">
+      {/* Aurora Spotlight — Profundidade no Analytics */}
+      <div className="absolute -top-24 left-1/4 w-[900px] h-[450px] bg-indigo-400/[0.06] blur-[130px] rounded-full pointer-events-none -z-10" />
+
       <PageHeader
         title="Analytics Inteligente"
         subtitle="Métricas reais extraídas diretamente do seu banco de dados Supabase."
         actions={
-          <div className="flex bg-white/20 backdrop-blur-md p-2 rounded-[1.5rem] border border-white/40 shadow-sm">
+          <div className="flex bg-white/70 backdrop-blur-2xl p-2 rounded-[1.5rem] border border-white/40 shadow-[0_10px_40px_rgba(0,0,0,0.05)] ring-1 ring-blue-500/10">
             {PERIODS.map((p, i) => (
               <button
                 key={p}
@@ -111,7 +114,7 @@ export default function Analytics() {
             {kpis.map((kpi, i) => {
               const Icon = kpi.icon;
               return (
-                <Card variant="glass" key={i} className="p-8 group cursor-default relative overflow-hidden">
+                <Card variant="glass" key={i} className="p-8 group cursor-default relative overflow-hidden transition-all duration-500 hover:-translate-y-1 hover:shadow-[0_40px_80px_rgba(0,0,0,0.08)] ring-1 ring-blue-500/5">
                   <div className="absolute inset-0 bg-gradient-to-br from-primary/0 to-primary/[0.02] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                   <div className={cn('w-14 h-14 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform shadow-sm relative z-10', kpi.bg, kpi.colorText)}>
                     <Icon className="w-7 h-7" />
@@ -124,7 +127,8 @@ export default function Analytics() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <Card variant="glass" className="p-10 min-h-[480px] flex flex-col items-center justify-center text-center group cursor-default">
+            <Card variant="glass" className="p-10 min-h-[480px] flex flex-col items-center justify-center text-center group cursor-default relative overflow-hidden">
+              <div className="absolute -top-20 -right-20 w-64 h-64 bg-primary/5 blur-3xl rounded-full pointer-events-none" />
               <div className="w-24 h-24 bg-white/60 rounded-full flex items-center justify-center mb-8 group-hover:scale-110 transition-all shadow-sm border border-white">
                 <BarChart3 className="w-10 h-10 text-primary opacity-40 group-hover:opacity-100 transition-all" />
               </div>
@@ -132,7 +136,8 @@ export default function Analytics() {
               <p className="text-slate-500 text-sm max-w-sm font-manrope font-bold leading-relaxed opacity-60 mb-12">
                 Volume financeiro distribuído ao longo do seu funil de vendas.
               </p>
-              <div className="w-full h-56 rounded-[2.5rem] bg-white/20 backdrop-blur-md border border-white/40 flex items-end justify-center gap-6 px-12 pb-8 group-hover:border-primary/20 transition-all shadow-inner">
+              <div className="w-full h-56 rounded-[2.5rem] bg-white/40 backdrop-blur-2xl border border-white/40 flex items-end justify-center gap-6 px-12 pb-8 group-hover:border-primary/20 transition-all shadow-inner relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-t from-primary/[0.03] to-transparent pointer-events-none" />
                 {PIPELINE_STAGES.map((stage, i) => (
                   <div key={stage.id} className="flex-1 flex flex-col items-center gap-4 h-full justify-end">
                     <motion.div

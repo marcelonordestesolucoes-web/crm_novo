@@ -48,6 +48,39 @@
 
   /* Animations */
   --animate-pulse-slow: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-border-beam: border-beam 4s linear infinite;
+  --animate-breathing: breathing 8s ease-in-out infinite;
+  --animate-breathing-fast: breathing 5s ease-in-out infinite;
+  --animate-breathing-slow: breathing 12s ease-in-out infinite;
+}
+
+@keyframes breathing {
+  0%, 100% { transform: scale(1) translateY(0); opacity: 0.5; filter: saturate(1) brightness(1); }
+  50% { transform: scale(1.15) translateY(-20px); opacity: 0.9; filter: saturate(2) brightness(1.2); }
+}
+
+@keyframes border-beam {
+  from { offset-distance: 0%; }
+  to { offset-distance: 100%; }
+}
+
+.mica-glass {
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  will-change: backdrop-filter, transform;
+}
+
+.prism-glass {
+  backdrop-filter: blur(30px) saturate(350%) contrast(110%);
+  -webkit-backdrop-filter: blur(30px) saturate(350%) contrast(110%);
+  will-change: backdrop-filter, transform;
+}
+
+.border-beam-container {
+  mask-image: linear-gradient(black, black), linear-gradient(black, black);
+  mask-clip: content-box, border-box;
+  mask-composite: exclude;
+  -webkit-mask-composite: destination-out;
 }
 
 :root {
@@ -55,7 +88,13 @@
   line-height: 1.5;
   font-weight: 400;
 
-  background-color: #f8fafc;
+  /* Aurora Glass Background — vinheta invertida: centro claro, bordas profundas */
+  background:
+    radial-gradient(circle at center, rgba(255,255,255,0.65) 0%, rgba(241,245,249,0.92) 55%, rgba(226,232,240,1) 100%),
+    radial-gradient(circle at 15% 15%, rgba(59, 130, 246, 0.08), transparent 42%),
+    radial-gradient(circle at 85% 25%, rgba(16, 185, 129, 0.06), transparent 40%),
+    radial-gradient(circle at 50% 85%, rgba(99, 102, 241, 0.04), transparent 38%);
+  background-attachment: fixed;
   color: #0f172a;
 
   font-synthesis: none;
@@ -98,4 +137,24 @@ body {
     'GRAD' 0,
     'opsz' 24;
   vertical-align: middle;
+}
+
+/* 🧪 PHANTOM SCROLLBAR — Quase imperceptível, estilo Vision Pro */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  transition: all 0.3s;
+}
+
+.custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25);
 }

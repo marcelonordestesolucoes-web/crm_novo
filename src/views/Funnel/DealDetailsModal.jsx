@@ -1,16 +1,21 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSupabase } from '@/hooks/useSupabase';
-import { getDealTimeline, moveDealStage, updateDeal } from '@/services/deals';
+import { getDealTimeline, moveDealStage, updateDeal, deleteDeal } from '@/services/deals';
 import { getTasksByDeal, toggleTaskStatus, createTask } from '@/services/tasks';
 import { getNotesByDeal, createNote, updateNote, deleteNote } from '@/services/notes';
 import { getAttachmentsByDeal, uploadAttachment, deleteAttachment } from '@/services/attachments';
-import { PIPELINE_STAGES, formatDate } from '@/constants/config';
+import { PIPELINE_STAGES, formatDate, formatCurrency } from '@/constants/config';
 import { LoadingSpinner, Badge, Button, Avatar } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { DealQualificationChecklist } from './DealQualificationChecklist';
+import { calculateDealRisk } from '@/utils/dealRisk';
+import { getPipelines, getPipelineStages } from '@/services/pipelines';
+import { transferDealToPipeline } from '@/services/deals';
+import { ChevronRight, FileText, ArrowRightLeft } from 'lucide-react';
 
-export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate }) => {
+export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) => {
   const [activeTab, setActiveTab] = useState('overview');
   const [taskLoading, setTaskLoading] = useState(false);
   const [noteLoading, setNoteLoading] = useState(false);
@@ -41,6 +46,17 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate }) => {
     qualification: {}
   });
   const [isSaving, setIsSaving] = useState(false);
+
+  // Transfer State
+  const [isTransferOpen, setIsTransferOpen] = useState(false);
+  const [availablePipelines, setAvailablePipelines] = useState([]);
+  const [transferData, setTransferData] = useState({
+    pipelineId: '',
+    stageId: '',
+    justification: ''
+  });
+  const [targetStages, setTargetStages] = useState([]);
+  const [loadingTransfer, setLoadingTransfer] = useState(false);
 
   const { data: timeline, loading: loadingTimeline, refetch: refetchTimeline } = useSupabase(() => deal?.id ? getDealTimeline(deal.id) : Promise.resolve([]), [deal?.id, isOpen]);
   const { data: tasks, loading: loadingTasks, refetch: refetchTasks } = useSupabase(() => deal?.id ? getTasksByDeal(deal.id) : Promise.resolve([]), [deal?.id, isOpen]);
@@ -79,10 +95,13 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate }) => {
     }
   };
 
-  const currentStageIndex = PIPELINE_STAGES.findIndex(s => s.id === deal.stage);
-  const nextStage = PIPELINE_STAGES[currentStageIndex + 1];
-  const isWon = deal.stage === 'closed_won';
-  const isLost = deal.stage === 'closed_lost';
+  const activeStages = (stages && stages.length > 0) ? stages : PIPELINE_STAGES;
+  const currentStageIndex = activeStages.findIndex(s => s.id.toLowerCase() === (deal.stage || '').toLowerCase());
+  // Se não encontrar o estágio (index -1), assume que estamos no início (e o próximo é o index 1)
+  const safeIndex = currentStageIndex === -1 ? 0 : currentStageIndex;
+  const nextStage = activeStages[safeIndex + 1];
+  const isWon = (deal.stage || '').toLowerCase() === 'won' || (deal.stage || '').toLowerCase() === 'closed_won';
+  const isLost = (deal.stage || '').toLowerCase() === 'lost' || (deal.stage || '').toLowerCase() === 'closed_lost';
 
   const handleAdvance = async () => {
     if (!nextStage) return;
@@ -95,13 +114,83 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate }) => {
     }
   };
 
-  const handleMarkLost = async () => {
+  const handleMarkWon = async () => {
     try {
-      await moveDealStage(deal.id, 'closed_lost');
+      await updateDeal(deal.id, { ...deal, status: 'won' });
+      if (onUpdate) onUpdate();
+      refetchTimeline();
+      alert('Parabéns! Negócio marcado como GANHO! 🎉');
+    } catch (err) {
+      alert('Erro ao marcar como ganho: ' + err.message);
+    }
+  };
+
+  const handleMarkLost = async () => {
+    if (!confirm('Deseja marcar este negócio como PERDIDO?')) return;
+    try {
+      await updateDeal(deal.id, { ...deal, status: 'lost' });
       if (onUpdate) onUpdate();
       refetchTimeline();
     } catch (err) {
       alert('Erro ao marcar como perdido: ' + err.message);
+    }
+  };
+
+  const handleExclude = async () => {
+    if (!confirm('Tem certeza que deseja EXCLUIR este negócio permanentemente? Esta ação não pode ser desfeita.')) return;
+    try {
+      await deleteDeal(deal.id);
+      if (onUpdate) onUpdate();
+      onClose();
+    } catch (err) {
+      alert('Erro ao excluir negócio: ' + err.message);
+    }
+  };
+
+  const handleOpenTransfer = async () => {
+    setIsTransferOpen(true);
+    try {
+      const pips = await getPipelines();
+      setAvailablePipelines(pips);
+    } catch (err) {
+      console.error('Erro ao carregar funis:', err);
+    }
+  };
+
+  const handlePipelineChange = async (pipelineId) => {
+    setTransferData({ ...transferData, pipelineId, stageId: '' });
+    try {
+      const sts = await getPipelineStages(pipelineId);
+      setTargetStages(sts);
+      if (sts.length > 0) {
+        setTransferData(prev => ({ ...prev, pipelineId, stageId: sts[0].id }));
+      }
+    } catch (err) {
+      console.error('Erro ao carregar etapas:', err);
+    }
+  };
+
+  const executeTransfer = async () => {
+    if (!transferData.pipelineId || !transferData.stageId || !transferData.justification.trim()) {
+      alert('Preencha funil, etapa e justificativa.');
+      return;
+    }
+    setLoadingTransfer(true);
+    try {
+      const selectedPipeline = availablePipelines.find(p => p.id === transferData.pipelineId);
+      await transferDealToPipeline(
+        deal.id, 
+        selectedPipeline?.name || transferData.pipelineId, 
+        transferData.stageId, 
+        transferData.justification
+      );
+      if (onUpdate) onUpdate();
+      setIsTransferOpen(false);
+      onClose(); // Fecha o modal após transferir para forçar refresh geral
+    } catch (err) {
+      alert('Erro na transferência: ' + err.message);
+    } finally {
+      setLoadingTransfer(false);
     }
   };
 
@@ -213,19 +302,19 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate }) => {
     { id: 'visit',   label: 'Visita',  icon: 'location_on' },
   ];
 
-  return (
+  return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[100] bg-navy/20 backdrop-blur-md flex items-center justify-end font-inter">
+        <div className="fixed inset-0 z-[9999] bg-navy/20 backdrop-blur-md flex items-center justify-end font-inter">
             <motion.div 
             initial={{ x: '100%', opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: '100%', opacity: 0 }}
             transition={{ type: 'spring', damping: 30, stiffness: 200 }}
-            className="w-full max-w-6xl h-[97vh] my-auto mr-4 bg-white/70 backdrop-blur-3xl rounded-[3rem] shadow-[0_32px_100px_-20px_rgba(0,0,0,0.15)] flex flex-col overflow-hidden border border-white/40"
+            className="w-full max-w-7xl h-[97vh] my-auto mr-4 bg-white/70 backdrop-blur-3xl rounded-[3rem] shadow-[0_32px_100px_-20px_rgba(0,0,0,0.15)] flex flex-col overflow-hidden border border-white/40"
           >
             {/* Modal Header - Ultra Integrated */}
-            <div className="p-12 pb-8 border-b border-white/20 flex justify-between items-start bg-white/40 backdrop-blur-md z-20">
+            <div className="p-8 pb-6 border-b border-white/20 flex justify-between items-start bg-white/40 backdrop-blur-md z-20 relative">
               <div className="flex gap-10 flex-1 mr-8">
                 <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center shrink-0 border border-primary/5 shadow-sm">
                   <span className="material-symbols-outlined text-3xl text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>domain</span>
@@ -238,7 +327,7 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate }) => {
                       className="text-3xl font-manrope font-black text-on-surface tracking-tight bg-transparent border-0 p-0 focus:ring-0 w-full hover:bg-black/5 rounded-lg transition-colors"
                     />
                     <Badge 
-                      label={PIPELINE_STAGES.find(s => s.id === deal.stage)?.label || deal.stage} 
+                      label={activeStages.find(s => s.id.toLowerCase() === (deal.stage || '').toLowerCase())?.label || deal.stage} 
                       className={cn("px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border border-white/40", isWon ? 'bg-emerald-100 text-emerald-700' : isLost ? 'bg-red-100 text-red-700' : 'bg-primary-fixed text-on-primary-fixed')}
                     />
                   </div>
@@ -247,28 +336,51 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate }) => {
                   </p>
                 </div>
               </div>
-              <div className="flex gap-4 shrink-0 items-center">
+              <div className="flex gap-2 shrink-0 items-center justify-end flex-wrap max-w-[60%]">
                 {hasChanges && (
                   <button 
                     onClick={handleSave} 
                     disabled={isSaving}
-                    className="px-6 py-2.5 rounded-full bg-emerald-500 text-white font-black text-[11px] uppercase tracking-widest shadow-lg shadow-emerald-200 hover:shadow-xl active:scale-95 transition-all flex items-center gap-2"
+                    className="px-4 py-2 rounded-full bg-emerald-500 text-white font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-200 hover:shadow-xl active:scale-95 transition-all flex items-center gap-2"
                   >
                     {isSaving ? <LoadingSpinner size="sm" color="white" /> : <span className="material-symbols-outlined text-base">save</span>}
-                    Salvar Alterações
+                    Salvar
                   </button>
                 )}
                 {!isLost && !isWon && (
-                  <button onClick={handleMarkLost} className="px-6 py-2.5 rounded-full bg-white/40 text-slate-500 font-black text-[11px] uppercase tracking-widest hover:bg-red-50 hover:text-red-700 transition-all border border-white/40 hover:border-red-100 shadow-sm active:scale-95">Perder Negócio</button>
+                  <>
+                    <button onClick={handleExclude} className="px-4 py-2 rounded-full bg-white/40 text-red-500 font-black text-[11px] uppercase tracking-widest hover:bg-red-50 hover:text-red-700 transition-all border border-red-100/40 shadow-sm active:scale-95">Excluir</button>
+                    <button 
+                      onClick={handleMarkLost} 
+                      className="px-4 py-2 rounded-full bg-rose-50 text-rose-600 font-black text-[10px] uppercase tracking-widest border border-rose-100 shadow-sm hover:bg-rose-100 transition-all active:scale-95 flex items-center gap-2"
+                    >
+                      <span className="material-symbols-outlined text-base">heart_broken</span>
+                      Perder Negócio
+                    </button>
+                    <button 
+                      onClick={handleMarkWon} 
+                      className="px-6 py-2 rounded-full bg-emerald-500 text-white font-black text-[11px] uppercase tracking-[0.1em] shadow-lg shadow-emerald-200 hover:shadow-xl active:scale-95 transition-all flex items-center gap-2"
+                    >
+                      <span className="material-symbols-outlined text-base">emoji_events</span>
+                      Marcar Ganho
+                    </button>
+                  </>
                 )}
                 {nextStage && !isWon && (
-                  <button onClick={handleAdvance} className="px-8 py-2.5 rounded-full bg-primary text-white font-black text-[11px] uppercase tracking-[0.2em] shadow-lg shadow-primary/20 hover:shadow-xl active:scale-[0.98] transition-all flex items-center gap-3 whitespace-nowrap">
-                    Avançar para {nextStage.label}
-                    <span className="material-symbols-outlined text-sm">trending_flat</span>
+                  <button onClick={handleAdvance} className="px-5 py-2 rounded-full bg-primary text-white font-black text-[10px] uppercase tracking-[0.15em] shadow-lg shadow-primary/20 hover:shadow-xl active:scale-[0.98] transition-all flex items-center gap-2 whitespace-nowrap">
+                    Avançar
+                    <span className="material-symbols-outlined text-base">trending_flat</span>
                   </button>
                 )}
-                <button onClick={onClose} className="p-2.5 rounded-full border border-white/60 bg-white/40 text-slate-400 hover:bg-white hover:text-on-surface transition-all ml-2 shadow-sm">
-                  <span className="material-symbols-outlined">close</span>
+                <button onClick={handleOpenTransfer} className="p-2 rounded-full border border-white/60 bg-white/40 text-slate-500 hover:bg-slate-50 hover:text-primary transition-all shadow-sm flex items-center gap-2 px-3">
+                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                  <span className="font-black text-[10px] uppercase tracking-widest uppercase">Funil</span>
+                </button>
+                <button 
+                  onClick={onClose} 
+                  className="p-2 rounded-full border border-white/60 bg-white/40 text-slate-400 hover:bg-white hover:text-on-surface transition-all shadow-sm active:scale-95"
+                >
+                  <span className="material-symbols-outlined text-xl">close</span>
                 </button>
               </div>
             </div>
@@ -326,7 +438,7 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate }) => {
                       <div className="space-y-6">
                         <h4 className="text-xl font-manrope font-black text-on-surface tracking-tight">Resumo Executivo</h4>
                         <p className="text-slate-600 leading-relaxed font-inter opacity-80 text-base">
-                          O cliente {deal.company} demonstrou forte interesse em centralizar sua infraestrutura de dados. O foco principal está na latência e integridade durante a migração. Atualmente em fase de { deal.stage === 'negotiation' ? 'negociação final de termos' : 'validação de requisitos técnicos' }.
+                          O cliente {deal.company} demonstrou forte interesse em centralizar sua infraestrutura de dados. O foco principal está na latência e integridade durante a migração. Atualmente em fase de { (deal.stage || '').toLowerCase() === 'negotiation' ? 'negociação final de termos' : 'validação de requisitos técnicos' }.
                         </p>
                       </div>
 
@@ -637,65 +749,201 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate }) => {
 
               {/* Sidebar Insights (32%) - Oracle Style AI */}
               <div className="w-[32%] p-10 bg-white/20 backdrop-blur-md overflow-y-auto space-y-8 h-full scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
-                <div className="p-8 rounded-[3rem] bg-gradient-to-br from-tertiary/20 to-tertiary-container/10 border border-white/40 relative overflow-hidden shadow-2xl shadow-tertiary/10 hover:scale-[1.02] transition-all cursor-default group/oracle">
-                  <div className="flex items-center gap-2 text-tertiary mb-6 relative z-10 transition-colors">
-                    <span className="material-symbols-outlined text-2xl" style={{ fontVariationSettings: "'FILL' 1" }}>bolt</span>
-                    <span className="font-extrabold text-[10px] uppercase tracking-[0.3em]">Oracle Insight IA</span>
-                  </div>
-                  <h5 className="font-manrope font-black text-on-surface mb-4 italic relative z-10 text-xl tracking-tight leading-tight">"Ciclo de vendas acelerado."</h5>
-                  <p className="text-sm text-slate-600 leading-[1.8] relative z-10 opacity-90 font-inter">
-                    Este negócio ({deal.title}) demonstra padrões de conversão ultra-rápida. A interação com a {deal.company} está fluindo 3x mais rápido que a sua média histórica. Recomendo formalizar a minuta contratual nas próximas 48 horas.
-                  </p>
-                  <div className="mt-8 relative z-10">
-                    <div className="p-5 bg-white/70 backdrop-blur-xl rounded-2xl border border-white/80 shadow-sm group">
-                      <p className="text-[9px] font-extrabold text-slate-400 uppercase tracking-[0.2em] mb-2 opacity-60">Próximo Passo Estratégico</p>
-                      <p className="text-xs font-black text-tertiary group-hover:underline">Gerar Proposta Final via PDF</p>
-                    </div>
-                  </div>
-                </div>
+                {(() => {
+                  const riskInfo = calculateDealRisk(editData.qualification);
+                  const hasData = Object.keys(editData.qualification || {}).length > 0;
+                  
+                  let headline = "Qualificação Pendente";
+                  let description = "Este negócio ainda não possui dados de qualificação básicos. Preencha o questionário ao lado para liberar a análise estratégica.";
+                  let nextStep = "Preencher questionário";
+                  let cardStyle = "from-slate-400/20 to-slate-200/10 border-white/20";
+                  let iconColor = "text-slate-400";
 
-                <div className="space-y-4 pt-4">
-                  <h5 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest px-2 opacity-60">Stakeholders do Negócio</h5>
-                  <div className="flex items-center gap-4 p-5 bg-white/40 backdrop-blur-sm rounded-[2.5rem] border border-white/40 shadow-sm hover:shadow-2xl transition-all group">
-                    <img alt="Ficha" className="w-12 h-12 rounded-full border-4 border-white/60 shadow-md transition-transform group-hover:rotate-6" src={`https://ui-avatars.com/api/?name=${encodeURIComponent(deal.ownerName)}&background=003ec7&color=fff`} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-base font-manrope font-black text-on-surface truncate tracking-tight">{deal.ownerName}</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-widest font-bold opacity-60">Lead Sales Strategist</p>
-                    </div>
-                  </div>
-                </div>
+                  if (hasData) {
+                    if (riskInfo?.risk === 'high') {
+                      headline = "Atenção: Risco Detectado";
+                      const missingParts = [];
+                      if (!editData.qualification.budget) missingParts.push("orçamento");
+                      if (!editData.qualification.decisionMaker) missingParts.push("decisor");
+                      if (!editData.qualification.urgency) missingParts.push("urgência");
+                      
+                      description = `Identificamos lacunas críticas em: ${missingParts.join(', ')}. A probabilidade de fechamento é baixa sem validar estes pilares essenciais.`;
+                      nextStep = !editData.qualification.decisionMaker ? "Agendar com Decisor" : "Validar Orçamento";
+                      cardStyle = "from-error/20 to-error/5 border-error/20";
+                      iconColor = "text-error";
+                    } else if (riskInfo?.risk === 'medium') {
+                      headline = "Ciclo em Evolução";
+                      description = "O negócio demonstra tração, mas possui pontos de fricção parcial. Recomendamos manter o engajamento próximo para fechar os dados restantes.";
+                      nextStep = "Confirmar Próximos Passos";
+                      cardStyle = "from-amber-500/20 to-amber-200/5 border-amber-200/20";
+                      iconColor = "text-amber-500";
+                    } else {
+                      headline = "Excelente Saúde";
+                      description = "Padrões de conversão sólidos detectados! Os pilares de orçamento e decisão estão validados, favorecendo um fechamento acelerado.";
+                      nextStep = "Gerar Proposta/Minuta";
+                      cardStyle = "from-primary/20 to-primary-container/10 border-white/40";
+                      iconColor = "text-primary";
+                    }
+                  }
 
-                <div className="p-8 rounded-[3rem] bg-white/40 backdrop-blur-sm border border-white/40 mt-4 shadow-sm hover:shadow-2xl transition-all cursor-default overflow-hidden relative group/matriz">
-                   <div className="absolute top-0 right-0 w-24 h-24 bg-white/20 rounded-full -mr-10 -mt-10 opacity-50 transition-transform group-hover/matriz:scale-150 duration-700" />
-                   <h5 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-8 relative">Matriz de Risco</h5>
-                  <div className="space-y-6 relative">
-                    <div className="space-y-3">
-                      <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
-                        <span className="text-slate-400">Engajamento</span>
-                        <span className="text-primary">85% / ALTO</span>
+                  return (
+                    <>
+                      <div className={cn("p-8 rounded-[3rem] bg-gradient-to-br border relative overflow-hidden shadow-2xl transition-all cursor-default group/oracle", cardStyle)}>
+                        <div className={cn("flex items-center gap-2 mb-6 relative z-10 transition-colors", iconColor)}>
+                          <span className="material-symbols-outlined text-2xl" style={{ fontVariationSettings: "'FILL' 1" }}>bolt</span>
+                          <span className="font-extrabold text-[10px] uppercase tracking-[0.3em]">Oracle Insight IA</span>
+                        </div>
+                        <h5 className="font-manrope font-black text-on-surface mb-4 italic relative z-10 text-xl tracking-tight leading-tight">"{headline}"</h5>
+                        <p className="text-sm text-slate-600 leading-[1.8] relative z-10 opacity-90 font-inter">
+                          {description}
+                        </p>
+                        <div className="mt-8 relative z-10">
+                          <div className="p-5 bg-white/70 backdrop-blur-xl rounded-2xl border border-white/80 shadow-sm group">
+                            <p className="text-[9px] font-extrabold text-slate-400 uppercase tracking-[0.2em] mb-2 opacity-60">Próximo Passo Estratégico</p>
+                            <p className={cn("text-xs font-black group-hover:underline", iconColor)}>{nextStep}</p>
+                          </div>
+                        </div>
                       </div>
-                      <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                        <div className="bg-primary w-[85%] h-full rounded-full" />
-                      </div>
-                    </div>
-                    
-                    <div className="space-y-3 pt-2">
-                       <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
-                        <span className="text-slate-400">Confirmação Orçamentária</span>
-                        <span className="text-tertiary">OK / VALIDADO</span>
-                      </div>
-                      <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                        <div className="bg-tertiary w-full h-full rounded-full" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
 
+                      <div className="space-y-4 pt-4">
+                        <h5 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest px-2 opacity-60">Stakeholders do Negócio</h5>
+                        <div className="flex items-center gap-4 p-5 bg-white/40 backdrop-blur-sm rounded-[2.5rem] border border-white/40 shadow-sm hover:shadow-2xl transition-all group">
+                          <img alt="Ficha" className="w-12 h-12 rounded-full border-4 border-white/60 shadow-md transition-transform group-hover:rotate-6" src={`https://ui-avatars.com/api/?name=${encodeURIComponent(deal.ownerName)}&background=003ec7&color=fff`} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-base font-manrope font-black text-on-surface truncate tracking-tight">{deal.ownerName}</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-widest font-bold opacity-60">Lead Sales Strategist</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-8 rounded-[3rem] bg-white/40 backdrop-blur-sm border border-white/40 mt-4 shadow-sm hover:shadow-2xl transition-all cursor-default overflow-hidden relative group/matriz">
+                        <div className="absolute top-0 right-0 w-24 h-24 bg-white/20 rounded-full -mr-10 -mt-10 opacity-50 transition-transform group-hover/matriz:scale-150 duration-700" />
+                        <h5 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-8 relative">Matriz de Risco</h5>
+                        <div className="space-y-6 relative">
+                          <div className="space-y-3">
+                            <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
+                              <span className="text-slate-400">Integridade dos Dados</span>
+                              <span className={cn(hasData ? "text-primary" : "text-slate-300")}>
+                                {hasData ? "VALIDADO / 100%" : "PENDENTE / 0%"}
+                              </span>
+                            </div>
+                            <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                              <div className={cn("h-full rounded-full transition-all duration-1000", hasData ? "bg-primary w-full" : "bg-slate-200 w-0")} />
+                            </div>
+                          </div>
+                          
+                          <div className="space-y-3 pt-2">
+                             <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
+                              <span className="text-slate-400">Confirmação Orçamentária</span>
+                              <span className={cn(editData.qualification.budget ? "text-emerald-500" : "text-error")}>
+                                {editData.qualification.budget ? "OK / VALIDADO" : "PENDENTE / ALERTA"}
+                              </span>
+                            </div>
+                            <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                              <div className={cn("h-full rounded-full transition-all duration-1000", editData.qualification.budget ? "bg-emerald-500 w-full" : "bg-error w-1/4")} />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
+
             </div>
           </motion.div>
+
+          {/* Transfer Overlay */}
+          <AnimatePresence>
+            {isTransferOpen && (
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="absolute inset-0 z-[110] bg-navy/40 backdrop-blur-xl flex items-center justify-center p-8"
+              >
+                <motion.div 
+                  initial={{ scale: 0.9, y: 20 }}
+                  animate={{ scale: 1, y: 0 }}
+                  className="w-full max-w-xl bg-white rounded-[3rem] p-12 shadow-2xl space-y-8"
+                >
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h4 className="text-2xl font-manrope font-black text-on-surface tracking-tight">Transferir Negócio</h4>
+                      <p className="text-slate-400 font-bold text-xs uppercase tracking-widest mt-1">Mudar de Funil Estratégico</p>
+                    </div>
+                    <button onClick={() => setIsTransferOpen(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                      <span className="material-symbols-outlined">close</span>
+                    </button>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Funil de Destino</label>
+                       <select 
+                         value={transferData.pipelineId}
+                         onChange={(e) => handlePipelineChange(e.target.value)}
+                         className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-4 px-6 text-base font-black text-on-surface focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                       >
+                         <option value="">Selecione o Funil...</option>
+                         {availablePipelines.map(p => (
+                           <option key={p.id} value={p.id}>{p.name}</option>
+                         ))}
+                       </select>
+                    </div>
+
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Estágio Inicial no Novo Funil</label>
+                       <select 
+                         value={transferData.stageId}
+                         onChange={(e) => setTransferData({ ...transferData, stageId: e.target.value })}
+                         className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-4 px-6 text-base font-black text-on-surface focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                         disabled={!transferData.pipelineId}
+                       >
+                         <option value="">Aguardando seleção de funil...</option>
+                         {targetStages.map(s => (
+                           <option key={s.id} value={s.id}>{s.label}</option>
+                         ))}
+                       </select>
+                    </div>
+
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Justificativa da Transferência</label>
+                       <textarea 
+                         value={transferData.justification}
+                         onChange={(e) => setTransferData({ ...transferData, justification: e.target.value })}
+                         placeholder="Por que este negócio está mudando de funil? Esta nota será salva no histórico."
+                         className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-4 px-6 text-base font-bold text-on-surface focus:ring-2 focus:ring-primary/20 outline-none transition-all min-h-[120px] resize-none"
+                       />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4 pt-4">
+                     <button 
+                       onClick={() => setIsTransferOpen(false)}
+                       className="flex-1 py-4 rounded-2xl border border-slate-200 text-slate-500 font-black text-[11px] uppercase tracking-widest hover:bg-slate-50 transition-all font-manrope"
+                     >
+                       Cancelar
+                     </button>
+                     <button 
+                       onClick={executeTransfer}
+                       disabled={loadingTransfer || !transferData.stageId || !transferData.justification.trim()}
+                       className="flex-1 py-4 rounded-2xl bg-primary text-white font-black text-[11px] uppercase tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-30 transition-all font-manrope flex items-center justify-center gap-3"
+                     >
+                       {loadingTransfer ? <LoadingSpinner size="sm" color="white" /> : (
+                         <>
+                           <ArrowRightLeft className="w-4 h-4" />
+                           Confirmar Transferência
+                         </>
+                       )}
+                     </button>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
     </AnimatePresence>
-  );
+  , document.body);
 };

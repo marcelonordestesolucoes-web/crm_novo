@@ -1,6 +1,5 @@
 import React from 'react';
 import { MoreVertical, Star } from 'lucide-react';
-import { mockCompanies } from '@/data/mockData';
 import { Badge, Button, Card, PageHeader, SearchBar, LoadingSpinner, ErrorMessage, Avatar } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { useSearch } from '@/hooks/useSearch';
@@ -16,7 +15,7 @@ const CompanyRow = ({ company, onEdit, onDelete }) => {
   const [showOptions, setShowOptions] = React.useState(false);
 
   return (
-    <Card variant="glass" className="p-8 group relative overflow-hidden">
+    <Card variant="glass" className="p-8 group relative overflow-hidden transition-all duration-500 hover:-translate-y-1 hover:scale-[1.005] hover:shadow-[0_20px_50px_rgba(0,0,0,0.05)]">
       <div className="absolute inset-0 bg-gradient-to-r from-primary/0 to-primary/[0.02] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
       <div className="flex items-center gap-8 relative z-10">
         {/* Logo - Styled */}
@@ -109,8 +108,7 @@ const CompanyRow = ({ company, onEdit, onDelete }) => {
 
 export default function Companies() {
   const { data, loading, error, refetch } = useSupabase(getCompanies);
-  // Fallback para mockData enquanto o banco não tiver dados
-  const companies = data?.length ? data : mockCompanies;
+  const companies = data || [];
   const { query, setQuery, filtered } = useSearch(companies, ['name', 'sector', 'taxId']);
 
   const [slideOpen, setSlideOpen] = React.useState(false);
@@ -141,21 +139,24 @@ export default function Companies() {
   };
 
   return (
-    <div className="animate-in fade-in duration-700 max-w-7xl mx-auto w-full">
+    <div className="animate-in fade-in duration-700 max-w-7xl mx-auto w-full relative -mt-10 z-10">
+      {/* Aurora Spotlight — Foco de Produto no Portfólio */}
+      <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-[900px] h-[450px] bg-emerald-400/[0.06] blur-[130px] rounded-full pointer-events-none -z-10" />
+
       <PageHeader
         title="Portfólio Estratégico"
         subtitle={`Gerenciando ${companies.length} contas-chave com supervisão estratégica.`}
         actions={<Button icon="add" onClick={handleOpenCreate}>Adicionar Empresa</Button>}
       />
 
-      <div className="flex items-center gap-4 bg-white/20 backdrop-blur-md p-3 rounded-[2rem] border border-white/40 mb-10 shadow-sm">
+      <div className="flex items-center gap-4 bg-white/70 backdrop-blur-2xl p-3 rounded-[2rem] border border-white/40 mb-10 shadow-[0_10px_40px_rgba(0,0,0,0.05)] ring-1 ring-emerald-500/10 transition-all duration-500 hover:shadow-lg">
         <SearchBar
           placeholder="Buscar no portfólio estratégico..."
           value={query}
           onChange={setQuery}
           className="bg-transparent border-0 shadow-none focus-within:ring-0"
         />
-        <button className="w-12 h-12 rounded-2xl border border-white/60 bg-white/40 hover:bg-white text-slate-400 hover:text-primary transition-all flex items-center justify-center shadow-sm">
+        <button className="w-12 h-12 rounded-2xl border border-white/60 bg-white/50 hover:bg-white text-slate-400 hover:text-primary transition-all flex items-center justify-center shadow-sm active:scale-95">
           <span className="material-symbols-outlined">filter_list</span>
         </button>
       </div>
@@ -176,7 +177,11 @@ export default function Companies() {
             ))
           ) : (
             <div className="text-center py-20 text-on-surface-variant font-inter">
-              Nenhuma empresa encontrada para "<span className="font-bold">{query}</span>".
+              {query ? (
+                <>Nenhuma empresa encontrada para "<span className="font-bold">{query}</span>".</>
+              ) : (
+                <>Seu portfólio estratégico está vazio. Clique em <span className="text-primary font-bold">Adicionar Empresa</span> para começar.</>
+              )}
             </div>
           )}
         </div>

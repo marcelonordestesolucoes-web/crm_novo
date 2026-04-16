@@ -51,8 +51,7 @@ export async function upsertPipeline(pipeline) {
  * Salva as etapas de um funil (substituição em massa para manter ordem).
  */
 export async function savePipelineStages(pipelineId, stages) {
-  // 1. Remove etapas atuais que não estão no novo conjunto (ou remove todas e reinsere)
-  // Por simplicidade e segurança de IDs, vamos fazer upsert/delete baseado na necessidade.
+  const { orgId } = await getUserPermissions();
   
   const { error: delError } = await supabase
     .from('pipeline_stages')

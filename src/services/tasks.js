@@ -33,6 +33,7 @@ export async function getTasks() {
     type:              task.type ?? 'task',
     dueDate:           task.due_date ? new Date(task.due_date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }) : 'Sem data',
     dueTime:           task.due_time || '',
+    dealId:            task.deal_id || null,
     dealTitle:         task.deals?.title || null,
     ownerName:         task.owner?.full_name || 'Usuário',
     ownerAvatar:       task.owner?.avatar_url || null,
@@ -147,6 +148,41 @@ async function insertTimelineEvent(dealId, type, description) {
   } catch (e) {
     console.error('Erro ao registrar na timeline:', e);
   }
+}
+
+/**
+ * Busca uma tarefa aberta (não concluída) com o mesmo título para um negócio.
+ */
+export async function getPendingTask(title, dealId) {
+  const { orgId } = await getUserPermissions();
+  
+  const { data, error } = await supabase
+    .from('tasks')
+    .select('id, status')
+    .eq('title', title)
+    .eq('deal_id', dealId)
+    .eq('org_id', orgId)
+    .eq('status', 'pending')
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function checkTaskExists(title, dealId) {
+  const { userId, orgId } = await getUserPermissions();
+  
+  const { count, error } = await supabase
+    .from('tasks')
+    .select('*', { count: 'exact', head: true })
+    .eq('title', title)
+    .eq('deal_id', dealId)
+    .eq('org_id', orgId)
+    .eq('status', 'pending');
+
+  if (error) throw error;
+  return count > 0;
 }
 
 export async function deleteTask(id) {

@@ -6,6 +6,7 @@ import { Badge, Button, Card, PageHeader, LoadingSpinner, ErrorMessage, Modal } 
 import { TASK_PRIORITY, TASK_STATUS } from '@/constants/config';
 import { useSupabase } from '@/hooks/useSupabase';
 import { getTasks, toggleTaskStatus } from '@/services/tasks';
+import { trackAIInteraction } from '@/services/aiTracking';
 import { TaskForm } from './TaskForm';
 
 const TaskItem = ({ task, onToggle, onEdit }) => {
@@ -19,7 +20,7 @@ const TaskItem = ({ task, onToggle, onEdit }) => {
 
       {/* Checkbox Ultra-Integrated */}
       <button
-        onClick={() => onToggle(task.id, task.status)}
+        onClick={() => onToggle(task)}
         className={cn(
           'w-12 h-12 rounded-2xl border-2 flex items-center justify-center transition-all shrink-0 shadow-sm relative z-10',
           isCompleted 
@@ -132,9 +133,14 @@ export default function Tasks() {
   const [modalOpen, setModalOpen] = React.useState(false);
   const [editingTask, setEditingTask] = React.useState(null);
 
-  const handleToggleStatus = async (id, currentStatus) => {
+  const handleToggleStatus = async (task) => {
     try {
-      await toggleTaskStatus(id, currentStatus);
+      await toggleTaskStatus(task.id, task.status);
+      
+      if (task.status !== 'completed' && task.dealId) {
+        trackAIInteraction(task.dealId, 'completed_task');
+      }
+
       refetch();
     } catch (err) {
       alert('Erro ao atualizar tarefa: ' + err.message);
@@ -166,7 +172,7 @@ export default function Tasks() {
   };
 
   return (
-    <div className="animate-in fade-in duration-700 max-w-7xl mx-auto w-full">
+    <div className="animate-in fade-in duration-700 max-w-7xl mx-auto w-full -mt-10 relative z-10">
       <PageHeader
         title="Gestão Estratégica"
         subtitle="Dashboard de ações e acompanhamento de fluxo."

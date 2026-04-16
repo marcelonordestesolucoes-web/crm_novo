@@ -28,7 +28,9 @@ export default function SettingsView() {
   ];
 
   return (
-    <div className="min-h-screen bg-surface p-8 lg:p-12">
+    <div className="min-h-screen bg-transparent p-8 lg:p-12 relative overflow-hidden">
+      {/* Aurora Spotlight — Foco no Menu de Configurações */}
+      <div className="absolute top-0 left-0 w-[600px] h-[600px] bg-blue-400/[0.04] blur-[100px] rounded-full pointer-events-none -z-10" />
       <div className="max-w-6xl mx-auto">
         
         {/* Header */}
@@ -60,8 +62,8 @@ export default function SettingsView() {
                   className={cn(
                     "w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-inter font-bold text-sm transition-all duration-300",
                     activeTab === tab.id 
-                      ? "bg-white text-primary shadow-xl shadow-slate-200/50 border border-slate-100" 
-                      : "text-slate-400 hover:text-on-surface hover:bg-white/50"
+                      ? "bg-white/80 text-primary shadow-xl shadow-blue-500/5 border border-white/60 backdrop-blur-xl ring-1 ring-blue-500/10" 
+                      : "text-slate-400 hover:text-on-surface hover:bg-white/40 backdrop-blur-sm"
                   )}
                 >
                   <span className={cn(

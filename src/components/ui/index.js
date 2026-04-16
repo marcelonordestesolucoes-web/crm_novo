@@ -11,3 +11,4 @@ export { ErrorMessage }   from './ErrorMessage';
 export { SlideOver }      from './SlideOver';
 export { Modal }          from './Modal';
 export { Avatar }         from './Avatar';
+export { GlassCard }      from './GlassCard';

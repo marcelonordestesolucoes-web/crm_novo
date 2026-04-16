@@ -8,19 +8,29 @@ import { getUserPermissions } from './auth';
 
 /**
  * Utilitário para converter a coluna "product" (Texto ou JSON) em array de objetos.
+ * Agora com fallback inteligente: se vazio, usa o valor/título do negócio.
  */
-const parseProducts = (rawProduct) => {
-  if (!rawProduct) return [];
+const parseProducts = (rawProduct, fallbackValue = 0, fallbackTitle = 'Produto') => {
+  let products = [];
   try {
-    const parsed = rawProduct;
-    // Se já for objeto ou array (o Supabase às vezes já devolve parseado se for coluna JSON)
-    if (typeof parsed === 'object') return Array.isArray(parsed) ? parsed : [parsed];
-    
-    const json = JSON.parse(rawProduct);
-    return Array.isArray(json) ? json : [{ name: rawProduct, price: 0 }];
+    if (rawProduct) {
+      if (typeof rawProduct === 'object') {
+        products = Array.isArray(rawProduct) ? rawProduct : [rawProduct];
+      } else {
+        const json = JSON.parse(rawProduct);
+        products = Array.isArray(json) ? json : [{ name: rawProduct, price: 0 }];
+      }
+    }
   } catch (e) {
-    return [{ name: rawProduct, price: 0 }];
+    products = [{ name: String(rawProduct), price: 0 }];
   }
+
+  // Se após o parse ainda estiver vazio mas houver um valor real no deal, cria item padrão
+  if (products.length === 0 && fallbackValue > 0) {
+    return [{ name: fallbackTitle || 'Produto Principal', price: fallbackValue }];
+  }
+
+  return products;
 };
 
 /**
@@ -29,12 +39,25 @@ const parseProducts = (rawProduct) => {
 export async function getDeals() {
   const { userId, orgId, isAdmin } = await getUserPermissions();
 
+  // 1. Buscar Estágios Dinâmicos para Mapeamento
+  const { data: allStages } = await supabase
+    .from('pipeline_stages')
+    .select('id, label');
+  
+  const stageMap = {};
+  if (allStages) {
+    allStages.forEach(s => stageMap[s.id] = s.label);
+  }
+
   let query = supabase
     .from('deals')
     .select(`
       *,
-      companies ( name ),
-      responsible:profiles!responsible_id ( full_name, avatar_url )
+      companies ( name, cnpj, segment ),
+      responsible:profiles!responsible_id ( full_name, avatar_url ),
+      contacts:deal_contacts(
+        contact:contacts(*)
+      )
     `)
     .eq('org_id', orgId);
 
@@ -49,20 +72,28 @@ export async function getDeals() {
 
   // Normaliza para o formato esperado pelos componentes
   return data.map((deal) => {
-    const products = parseProducts(deal.product);
+    const products = parseProducts(deal.product, deal.value, deal.title);
     
+    // Mapeamento profundo para os contatos vinculados
+    const contacts = deal.contacts ? deal.contacts.map(c => c.contact).filter(Boolean) : [];
+
     return {
       id:          deal.id,
       title:       deal.title,
       company:     deal.companies?.name || 'Sem Empresa',
+      taxId:       deal.companies?.cnpj || '',
+      segment:     deal.companies?.segment || '',
       value:       deal.value ?? 0,
       stage:       deal.stage ?? 'lead',
-      status:      'new',
+      stageLabel:  stageMap[deal.stage] || deal.stage, 
+      status:      deal.status || 'open',
       tags:        products.length > 0 ? [products[0].name] : [],
       ownerName:   deal.responsible?.full_name || 'Desconhecido',
       ownerAvatar: deal.responsible?.avatar_url || null,
       createdAt:   deal.created_at,
+      updatedAt:   deal.updated_at,
       products:    products,
+      contacts:    contacts, 
       qualification: deal.qualification ? (typeof deal.qualification === 'string' ? JSON.parse(deal.qualification) : deal.qualification) : {}
     };
   });
@@ -160,27 +191,128 @@ export async function createDeal(payload) {
 }
 
 /**
- * Atualiza um negócio existente.
+ * Atualiza um negócio existente com sincronização global de empresas e contatos.
  */
 export async function updateDeal(id, payload) {
-  // Ignora campos não previstos no update principal para evitar 400 Bad Request
+  const { orgId } = await getUserPermissions();
+
+  // 1. Atualizar Tabela de Negócios (Dados Básicos)
   const cleanPayload = {
     title: payload.title,
     value: payload.value,
     stage: payload.stage,
+    status: payload.status,
     product: payload.products ? JSON.stringify(payload.products) : null,
-    qualification: payload.qualification ? JSON.stringify(payload.qualification) : null
+    qualification: payload.qualification ? (typeof payload.qualification === 'string' ? payload.qualification : JSON.stringify(payload.qualification)) : null
   };
 
-  const { data, error } = await supabase
+  const { data: updatedDeal, error: dealError } = await supabase
     .from('deals')
     .update(cleanPayload)
     .eq('id', id)
     .select()
     .single();
 
-  if (error) throw new Error('Erro ao atualizar: ' + error.message);
-  return data;
+  if (dealError) throw dealError;
+
+  // 2. Atualizar Dados da Empresa (CNPJ e Segmento)
+  if (updatedDeal.company_id && (payload.taxId || payload.segment)) {
+    await supabase.from('companies').update({
+      cnpj: payload.taxId,
+      segment: payload.segment,
+      name: payload.company || undefined // Só atualiza se o nome não for vazio
+    }).eq('id', updatedDeal.company_id);
+  }
+
+  // 3. Sincronização Global de Contatos
+  if (payload.contacts && Array.isArray(payload.contacts)) {
+    const finalContactIds = [];
+
+    for (const contact of payload.contacts) {
+      if (!contact.name || !contact.name.trim()) continue;
+
+      let contactId = contact.id;
+
+      if (contactId) {
+        // Atualiza cadastro global do contato (como solicitado: alterações refletem em tudo)
+        await supabase.from('contacts').update({
+          name: contact.name,
+          role: contact.role,
+          phone: contact.phone,
+          email: contact.email
+        }).eq('id', contactId);
+      } else {
+        // Novo contato: cria globalmente já vinculado à organização e empresa
+        const { data: newContact, error: cErr } = await supabase.from('contacts').insert({
+          name: contact.name,
+          role: contact.role,
+          phone: contact.phone,
+          email: contact.email,
+          org_id: orgId,
+          company_id: updatedDeal.company_id
+        }).select().single();
+        
+        if (!cErr && newContact) contactId = newContact.id;
+      }
+
+      if (contactId) finalContactIds.push(contactId);
+    }
+
+    // 4. Sincronizar Vínculos (deal_contacts)
+    // Remove todos os vínculos atuais para reconstruir a lista atualizada
+    await supabase.from('deal_contacts').delete().eq('deal_id', id);
+    
+    // Insere os novos vínculos baseados na lista final de IDs (existentes + novos)
+    if (finalContactIds.length > 0) {
+      const links = finalContactIds.map(cid => ({
+        deal_id: id,
+        contact_id: cid
+      }));
+      await supabase.from('deal_contacts').insert(links);
+    }
+  }
+
+  // 5. Timeline Log de Edição
+  await supabase.from('deal_timeline').insert([{
+     deal_id: id,
+     type: 'updated',
+     description: `Oportunidade "${updatedDeal.title}" atualizada globalmente`
+  }]);
+
+  return updatedDeal;
+}
+
+/**
+ * Transfere um negócio para outro funil e estágio, com justificativa.
+ */
+export async function transferDealToPipeline(dealId, pipelineId, stageId, justification) {
+  // 1. Atualizar o estágio do negócio (e pipeline_id se existir a coluna)
+  const { data: updatedDeal, error: updateError } = await supabase
+    .from('deals')
+    .update({ 
+      stage: stageId,
+      // pipeline_id: pipelineId // Comentado por segurança até confirmar coluna
+    })
+    .eq('id', dealId)
+    .select()
+    .single();
+
+  if (updateError) throw updateError;
+
+  // 2. Registrar na deal_timeline
+  await supabase.from('deal_timeline').insert([{
+    deal_id:     dealId,
+    type:        'stage_change',
+    description: `Transferido para o funil ${pipelineId} no estágio ${stageId}`,
+  }]);
+
+  // 3. Criar a nota de justificativa
+  if (justification) {
+    const { createNote } = await import('./notes');
+    await createNote(dealId, `[TRANSFERÊNCIA] ${justification}`);
+  }
+
+  return updatedDeal;
 }
 
 /**

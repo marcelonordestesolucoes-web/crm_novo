@@ -2,7 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import Dashboard  from '@/views/Dashboard/Dashboard';
-import Pipeline   from '@/views/Pipeline/Pipeline';
+import Pipeline   from '@/views/Funnel/FunnelView';
 import Companies  from '@/views/Companies/Companies';
 import Contacts   from '@/views/Contacts/Contacts';
 import Tasks      from '@/views/Tasks/Tasks';

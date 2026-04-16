@@ -27,21 +27,20 @@ export const DealForm = ({ initialData, onSuccess, onCancel }) => {
 
   useEffect(() => {
     if (initialData) {
+      const initialProducts = initialData.products || [];
+      // Recalcular o valor total com base nos preços dos produtos para garantir sincronia
+      const calculatedTotal = initialProducts.reduce((sum, p) => sum + Number(p.price || 0), 0);
+      
       setFormData({
         title: initialData.title || '',
         company: initialData.company || '',
         taxId: initialData.taxId || '',
         segment: initialData.segment || '',
         leadSource: initialData.leadSource || LEAD_SOURCES[0],
-        products: initialData.products || [],
-        totalValue: initialData.value || 0,
+        products: initialProducts,
+        totalValue: calculatedTotal || initialData.value || 0,
         contacts: initialData.contacts?.length ? initialData.contacts : 
-                  (initialData.contactName ? [{
-                    name: initialData.contactName || '',
-                    role: initialData.contactRole || '',
-                    phone: initialData.contactPhone || '',
-                    email: initialData.contactEmail || ''
-                  }] : [{ name: '', role: '', phone: '', email: '' }]),
+                  [{ name: '', role: '', phone: '', email: '' }],
         stage: initialData.stage || 'lead',
         status: initialData.status || 'new',
       });
