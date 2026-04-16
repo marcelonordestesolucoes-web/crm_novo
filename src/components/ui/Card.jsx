@@ -50,13 +50,13 @@ export const Card = ({
             maskClip: 'content-box, border-box',
             maskComposite: 'exclude',
             WebkitMaskComposite: 'destination-out',
-            padding: '1.5px', // Espessura da borda
+            padding: '3px', // Espessura da borda aumentada para 3px
           }}
         >
           <div 
-            className="absolute w-40 h-40 rounded-full blur-[25px] animate-border-beam"
+            className="absolute w-64 h-64 rounded-full blur-[45px] animate-border-beam"
             style={{
-              background: 'linear-gradient(to right, transparent, #3b82f6, #8b5cf6, #2dd4bf, transparent)',
+              background: 'radial-gradient(circle, #3b82f6 0%, #8b5cf6 30%, #2dd4bf 60%, transparent 80%)',
               offsetPath: 'rect(0 0 100% 100% round 2.5rem)',
               offsetRotate: 'auto',
             }}
