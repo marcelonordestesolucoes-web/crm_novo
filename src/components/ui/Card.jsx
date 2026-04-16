@@ -57,7 +57,7 @@ export const Card = ({
             className="absolute w-64 h-64 rounded-full blur-[45px] animate-border-beam"
             style={{
               background: 'radial-gradient(circle, #3b82f6 0%, #8b5cf6 30%, #2dd4bf 60%, transparent 80%)',
-              offsetPath: 'rect(0 0 100% 100% round 2.5rem)',
+              offsetPath: 'inset(0 round 2.5rem)',
               offsetRotate: 'auto',
             }}
           />
