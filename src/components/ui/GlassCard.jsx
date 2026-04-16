@@ -87,7 +87,7 @@ export const GlassCard = forwardRef(({ children, className = "", depth = true, b
           <div 
             className="absolute w-72 h-72 rounded-full blur-[50px] animate-border-beam"
             style={{
-              background: 'radial-gradient(circle, #3b82f6 0%, #a855f7 30%, #2dd4bf 60%, transparent 80%)',
+              background: 'radial-gradient(circle, #00f2ff 0%, #bf5af2 35%, #30d158 65%, transparent 85%)',
               offsetPath: 'inset(0 round 2rem)',
               offsetRotate: 'auto',
             }}
