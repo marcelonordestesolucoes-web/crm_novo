@@ -395,7 +395,7 @@ export const OracleInsight = ({ onOpenDeal }) => {
 
   return (
     <aside className="space-y-6 antialiased">
-      <GlassCard className="min-h-[520px] flex flex-col group/ai">
+      <GlassCard beam={true} className="min-h-[520px] flex flex-col group/ai">
         {/* 🎨 MOOD LUMINOUS — Brilho de estado (Extremo do canvas, PULSANTE) */}
         <div className={cn("absolute -top-32 -right-32 w-[350px] h-[350px] blur-[100px] rounded-full transition-all duration-1000 opacity-60 animate-pulse", moodGlow)} />
 

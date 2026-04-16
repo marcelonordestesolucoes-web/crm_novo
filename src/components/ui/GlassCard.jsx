@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
  * Componente unificado com forwardRef para suportar Drag-and-Drop nativo 
  * e interatividade 3D sem conflitos de camadas.
  */
-export const GlassCard = forwardRef(({ children, className = "", depth = true, ...props }, ref) => {
+export const GlassCard = forwardRef(({ children, className = "", depth = true, beam = false, ...props }, ref) => {
   const [isHovering, setIsHovering] = useState(false);
   const mouse = useMouseGlow();
   const { rotateX, rotateY, glareX, glareY, handleMouseMove, handleMouseLeave } = useTilt();
@@ -71,6 +71,29 @@ export const GlassCard = forwardRef(({ children, className = "", depth = true, .
       {/* 💎 RIM LIGHT — Estático */}
       <div className="absolute inset-0 rounded-[2rem] border border-white/20 pointer-events-none z-20" />
       <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-white/20 to-transparent z-30 opacity-40" />
+
+      {/* ✨ ORBITAL BEAM — Efeito Gemini circular */}
+      {beam && (
+        <div 
+          className="absolute inset-0 pointer-events-none z-0 rounded-[2rem]"
+          style={{
+            maskImage: 'linear-gradient(black, black), linear-gradient(black, black)',
+            maskClip: 'content-box, border-box',
+            maskComposite: 'exclude',
+            WebkitMaskComposite: 'destination-out',
+            padding: '3px',
+          }}
+        >
+          <div 
+            className="absolute w-72 h-72 rounded-full blur-[50px] animate-border-beam"
+            style={{
+              background: 'radial-gradient(circle, #3b82f6 0%, #a855f7 30%, #2dd4bf 60%, transparent 80%)',
+              offsetPath: 'inset(0 round 2rem)',
+              offsetRotate: 'auto',
+            }}
+          />
+        </div>
+      )}
 
       {/* 🧠 CONTEÚDO */}
       <div 
