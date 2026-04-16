@@ -343,7 +343,7 @@ export const OracleInsight = ({ onOpenDeal }) => {
   }, [deals, tasks, adherenceData, latestNotes, orgGoal]);
 
   const moodGlow = React.useMemo(() => {
-    if (analysis?.isMetaImpossible) {
+    if (analysis?.isMetaImpossible || analysis?.isUnrealistic) {
       return "bg-red-500/40";
     }
 
@@ -352,6 +352,16 @@ export const OracleInsight = ({ onOpenDeal }) => {
     }
 
     return "bg-indigo-500/40";
+  }, [analysis]);
+
+  const beamColor = React.useMemo(() => {
+    if (analysis?.isMetaImpossible || analysis?.isUnrealistic) {
+      return "radial-gradient(circle, #ff4d4d 0%, #ef4444 40%, #7f1d1d 80%, transparent 100%)";
+    }
+    if (analysis?.highRiskCount > 0) {
+      return "radial-gradient(circle, #fbbf24 0%, #f59e0b 40%, #78350f 80%, transparent 100%)";
+    }
+    return "radial-gradient(circle, #00f2ff 0%, #bf5af2 35%, #30d158 65%, transparent 85%)";
   }, [analysis]);
 
   const handleCreateTask = async (item) => {
@@ -395,7 +405,7 @@ export const OracleInsight = ({ onOpenDeal }) => {
 
   return (
     <aside className="space-y-6 antialiased">
-      <GlassCard beam={true} className="min-h-[520px] flex flex-col group/ai">
+      <GlassCard beam={true} beamColor={beamColor} className="min-h-[520px] flex flex-col group/ai">
         {/* 🎨 MOOD LUMINOUS — Brilho de estado (Extremo do canvas, PULSANTE) */}
         <div className={cn("absolute -top-32 -right-32 w-[350px] h-[350px] blur-[100px] rounded-full transition-all duration-1000 opacity-60 animate-pulse", moodGlow)} />
 

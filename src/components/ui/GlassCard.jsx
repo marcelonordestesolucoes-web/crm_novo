@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
  * Componente unificado com forwardRef para suportar Drag-and-Drop nativo 
  * e interatividade 3D sem conflitos de camadas.
  */
-export const GlassCard = forwardRef(({ children, className = "", depth = true, beam = false, ...props }, ref) => {
+export const GlassCard = forwardRef(({ children, className = "", depth = true, beam = false, beamColor, ...props }, ref) => {
   const [isHovering, setIsHovering] = useState(false);
   const mouse = useMouseGlow();
   const { rotateX, rotateY, glareX, glareY, handleMouseMove, handleMouseLeave } = useTilt();
@@ -87,7 +87,7 @@ export const GlassCard = forwardRef(({ children, className = "", depth = true, b
           <div 
             className="absolute w-72 h-72 rounded-full blur-[50px] animate-border-beam"
             style={{
-              background: 'radial-gradient(circle, #00f2ff 0%, #bf5af2 35%, #30d158 65%, transparent 85%)',
+              background: beamColor || 'radial-gradient(circle, #00f2ff 0%, #bf5af2 35%, #30d158 65%, transparent 85%)',
               offsetPath: 'inset(0 round 2rem)',
               offsetRotate: 'auto',
             }}
