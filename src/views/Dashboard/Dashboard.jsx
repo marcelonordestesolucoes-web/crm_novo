@@ -1,6 +1,11 @@
 import React from 'react';
 import { Card, Avatar } from '@/components/ui';
 import { SummaryStats } from '@/components/dashboard/SummaryStats';
+import { PriorityQueue } from '@/components/dashboard/PriorityQueue';
+import { ActionableDeals } from '@/components/dashboard/ActionableDeals';
+import { PlaybookInsights } from '@/components/dashboard/PlaybookInsights';
+import { IAPerformance } from '@/components/dashboard/IAPerformance';
+import { AIOnboardingRoadmap } from '@/components/dashboard/AIOnboardingRoadmap';
 import { OracleInsight } from '@/components/intelligence/OracleInsight';
 import { DealDetailsModal } from '@/views/Funnel/DealDetailsModal';
 import { useSupabase } from '@/hooks/useSupabase';
@@ -17,6 +22,7 @@ export default function Dashboard() {
   const [detailsModalOpen, setDetailsModalOpen] = React.useState(false);
   const { data: deals, refetch } = useSupabase(getDeals);
   const [targetGoal, setTargetGoal] = React.useState(null);
+  console.log('[DEBUG DASHBOARD] Deals:', deals?.length, 'Meta:', targetGoal);
   const [latestNotes, setLatestNotes] = React.useState({});
   const [planModalOpen, setPlanModalOpen] = React.useState(false);
 
@@ -84,17 +90,18 @@ export default function Dashboard() {
     const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
     const daysRemaining = Math.max(1, Math.ceil((endOfMonth - today) / (1000 * 60 * 60 * 24)));
 
-    // Filter and Process Qualified Deals (Post-Lead)
+    // Filter and Process Qualified Deals (Lead stage included for visibility)
     const categorizedDeals = deals
-      .filter(d => {
-        const label = (d.stageLabel || '').toUpperCase();
-        return !label.includes('LEAD');
-      })
       .map(deal => {
+        const label = (deal.stageLabel || '').toUpperCase();
+        const isLead = label.includes('LEAD');
+        
         const notes = latestNotes[deal.id] || [];
         const { score } = calculateClosingScore(deal, notes);
-        const forecast = (deal.value || 0) * (score / 100);
-        return { ...deal, score, forecast };
+        
+        // Leads não compõem Forecast financeiro, mas entram no processamento de sinais
+        const forecast = isLead ? 0 : (deal.value || 0) * (score / 100);
+        return { ...deal, score, forecast, isLead };
       });
 
     let totalForecast = 0;
@@ -188,22 +195,22 @@ export default function Dashboard() {
 
   const metaValue = targetGoal?.amount || 50000;
   return (
-    <div className="flex flex-col gap-y-10 pb-16 pt-0 -mt-10 animate-in fade-in duration-700 relative z-10">
+    <div className="flex flex-col gap-y-10 pb-16 pt-0 -mt-10 animate-in fade-in duration-700 relative z-0">
       <div className="grid grid-cols-12 gap-8">
         <div className="col-span-12 xl:col-span-8 flex flex-col gap-12 relative">
-          {/* 🌈 EXTREME VIBRATION GLOWS — Gradientes intensos para "beber" no cristal */}
-          <div className="absolute top-0 left-1/4 w-[700px] h-[500px] bg-gradient-to-br from-blue-600/30 to-cyan-400/20 blur-[130px] rounded-full pointer-events-none -z-10 animate-pulse duration-[6000ms]" />
-          <div className="absolute top-1/3 right-1/4 w-[600px] h-[600px] bg-gradient-to-br from-purple-600/25 to-pink-500/15 blur-[140px] rounded-full pointer-events-none -z-10 animate-pulse duration-[8000ms] delay-1000" />
-          <div className="absolute bottom-10 left-1/3 w-full h-[400px] bg-gradient-to-tr from-teal-500/20 via-blue-500/10 to-transparent blur-[120px] rounded-full pointer-events-none -z-10" />
+          {/* 🌈 EXTREME VIBRATION GLOWS — Intensified for 'Crystal' immersion */}
+          <div className="absolute top-0 left-1/4 w-[800px] h-[600px] bg-gradient-to-br from-blue-600/20 to-cyan-400/10 blur-[130px] rounded-full pointer-events-none -z-10 animate-pulse duration-[8000ms]" />
+          <div className="absolute top-1/3 right-1/4 w-[700px] h-[700px] bg-gradient-to-br from-purple-600/15 to-pink-500/10 blur-[140px] rounded-full pointer-events-none -z-10 animate-pulse duration-[10000ms] delay-2000" />
+          <div className="absolute bottom-10 left-1/3 w-full h-[500px] bg-gradient-to-tr from-teal-500/10 via-blue-500/5 to-transparent blur-[120px] rounded-full pointer-events-none -z-10" />
 
           <SummaryStats />
 
           {/* New Central Goal Card — Ultra Glass Premium */}
           <section className="animate-in fade-in slide-in-from-bottom-4 duration-1000 delay-200 relative">
-            {/* Spotlight — Foco de produto cristalino */}
-            <div className="absolute -z-10 -top-20 left-1/2 -translate-x-1/2 w-[900px] h-[400px] bg-blue-500/[0.08] blur-[140px] rounded-full pointer-events-none animate-pulse duration-[6000ms]" />
+            {/* Spotlight — Focal crystalline product highlight */}
+            <div className="absolute -z-10 -top-20 left-1/2 -translate-x-1/2 w-[900px] h-[400px] bg-blue-500/[0.05] blur-[140px] rounded-full pointer-events-none animate-pulse duration-[6000ms]" />
             
-            <Card variant="crystal" className="p-10 relative z-10 overflow-hidden group/main shadow-[0_30px_60px_-15px_rgba(0,0,0,0.1)]">
+            <Card variant="crystal" className="p-10 relative z-10 overflow-hidden group/main shadow-[0_30px_60px_-15px_rgba(0,0,0,0.1)] border-white/20">
               {/* Border Beam — Sutil e etéreo */}
               <div 
                 className="absolute inset-0 pointer-events-none z-20"
@@ -248,18 +255,22 @@ export default function Dashboard() {
                   </div>
                   
                   <h2 className="text-4xl font-manrope font-black text-on-surface mb-2 tracking-tighter">
-                    {metrics.gap <= 0 
-                      ? 'Meta Atingida! 🎯' 
-                      : metrics.isMetaImpossible 
-                        ? 'Pipeline Insuficiente ⚠️' 
-                        : 'Rumo ao Objetivo'}
+                    {metrics.totalForecast === 0 && (!targetGoal || targetGoal.amount === 0)
+                      ? 'Inicie sua Jornada Elite 🚀'
+                      : metrics.gap <= 0 
+                        ? 'Meta Atingida! 🎯' 
+                        : metrics.isMetaImpossible 
+                          ? 'Pipeline Insuficiente ⚠️' 
+                          : 'Rumo ao Objetivo'}
                   </h2>
                   <p className="text-slate-600 font-bold mb-8 max-w-md">
-                    {metrics.gap <= 0 
-                      ? 'Parabéns! O forecast superou a meta estabelecida. Continue acelerando para um fechamento recorde.' 
-                      : metrics.isMetaImpossible
-                        ? `A meta de ${formatCurrency(metrics.metaValue)} não pode ser atingida com o pipeline atual. Mesmo fechando 100% dos negócios existentes, faltam ${formatCurrency(Math.round(metrics.missingPipeline))} em novas oportunidades.`
-                        : `Se não houver avanço imediato, a meta não será atingida. Você está a ${formatCurrency(metrics.gap)} de distância do objetivo.`}
+                    {metrics.totalForecast === 0 && (!targetGoal || targetGoal.amount === 0)
+                      ? 'Seu pipeline está pronto. Comece a converter seus leads do WhatsApp em negócios para ver suas projeções de fechamento.'
+                      : metrics.gap <= 0 
+                        ? 'Parabéns! O forecast superou a meta estabelecida. Continue acelerando para um fechamento recorde.' 
+                        : metrics.isMetaImpossible
+                          ? `A meta de ${formatCurrency(metrics.metaValue)} não pode ser atingida com o pipeline atual. Mesmo fechando 100% dos negócios existentes, faltam ${formatCurrency(Math.round(metrics.missingPipeline))} em novas oportunidades.`
+                          : `Se não houver avanço imediato, a meta não será atingida. Você está a ${formatCurrency(metrics.gap)} de distância do objetivo.`}
                   </p>
                   
                   <div className="flex flex-wrap gap-10">
@@ -381,218 +392,127 @@ export default function Dashboard() {
             </Card>
           </section>
 
-          {/* Closing Plan Modal (Slide-over/Modal) */}
-          {planModalOpen && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-              <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-                <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-primary/5">
-                  <div>
-                    <h3 className="text-2xl font-manrope font-black text-on-surface tracking-tight">Plano de Fechamento</h3>
-                    <p className={`text-sm font-bold ${metrics.isUnrealistic ? 'text-error' : 'text-slate-500'}`}>
-                      {metrics.isUnrealistic 
-                        ? 'Alerta: Pipeline insuficiente para a meta. Priorize estes deals:' 
-                        : 'Negócios decisivos para bater a meta'}
-                    </p>
-                  </div>
-                  <button onClick={() => setPlanModalOpen(false)} className="p-2 hover:bg-white rounded-full transition-colors">
-                    <X className="w-6 h-6 text-slate-400" />
-                  </button>
-                </div>
-                
-                <div className="p-8 max-h-[60vh] overflow-y-auto flex flex-col gap-4">
-                  {metrics.topDealsToClose.map((deal) => (
-                    <div 
-                      key={deal.id} 
-                      onClick={() => handleOpenDeal(deal.id)}
-                      className="p-6 rounded-[2rem] border border-slate-100 bg-white/50 backdrop-blur-sm hover:border-primary/20 hover:bg-white hover:shadow-xl hover:shadow-primary/5 transition-all flex items-center justify-between group cursor-pointer active:scale-[0.98]"
-                    >
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-1.5">
-                           <div className="w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
-                           <p className="text-sm font-manrope font-black text-on-surface group-hover:text-primary transition-colors">
-                             {deal.title}
-                           </p>
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{deal.company || 'Oportunidade'}</p>
-                          <div className="flex items-center gap-1.5 bg-primary/5 px-3 py-1 rounded-full">
-                            <span className="text-[9px] font-black text-primary uppercase tracking-wider">{deal.score}% Score</span>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-6">
-                        <div className="text-right">
-                          <p className="text-lg font-manrope font-black text-on-surface leading-none tracking-tighter">
-                            {formatCurrency(deal.value || 0)}
-                          </p>
-                        </div>
-                        
-                        <Avatar 
-                          src={deal.ownerAvatar || null} 
-                          name={deal.ownerName || 'Staff'} 
-                          size="sm" 
-                          className="w-9 h-9 border-white shadow-lg ring-1 ring-black/5"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
+          <AIOnboardingRoadmap />
 
-                <div className="p-8 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
-                  <div className="flex flex-col">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Impacto Combinado</p>
-                    <p className="text-xl font-manrope font-black text-on-surface">{formatCurrency(metrics.topDealsToClose.reduce((acc, d) => acc + d.forecast, 0))}</p>
-                  </div>
-                  <button onClick={() => setPlanModalOpen(false)} className="bg-slate-900 text-white px-8 py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all">
-                    Fechar Plano
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Strategic Insights */}
-          <section>
+          <section className="mt-8">
             <div className="flex items-center gap-4 mb-8">
-              <h2 className="text-3xl font-manrope font-black text-on-surface tracking-tight">Análise Estratégica</h2>
+              <h2 className="text-3xl font-manrope font-black text-on-surface tracking-tight">Vendas Guiadas por IA</h2>
               <span className="bg-primary/10 text-primary text-[10px] font-black uppercase tracking-[0.2em] px-4 py-1.5 rounded-full border border-primary/20">
-                Live Signals
+                Decision Engine Pro
               </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {/* Card: Deals at Risk */}
-              <Card variant="glass" className="p-7 border-l-4 border-l-error flex flex-col relative overflow-hidden group transition-all duration-300 hover:-translate-y-1 hover:scale-[1.01] hover:shadow-[0_20px_40px_rgba(0,0,0,0.08)]">
-                <div className="flex items-center gap-2 mb-6">
-                  <span className="bg-error/10 text-error text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-sm">Account at Risk</span>
-                  <AlertCircle className="text-error w-5 h-5 ml-auto animate-pulse" />
-                </div>
-                <h3 className="text-lg font-manrope font-black text-on-surface mb-0.5 tracking-tight group-hover:text-error transition-colors">
-                  {stratAnalysis.risk?.title || 'Nenhum risco relevante no pipeline atual'}
-                </h3>
-                {stratAnalysis.risk && (
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">
-                    {stratAnalysis.risk.company}
-                  </p>
-                )}
-                <p className="text-sm font-manrope font-bold text-slate-500 leading-relaxed mb-8 opacity-70">
-                  {stratAnalysis.risk 
-                    ? `Baixa probabilidade de fechamento (${stratAnalysis.risk.score}%). Risco de perda iminente.`
-                    : 'Não identificamos nenhum negócio qualificado em zona de risco crítico no momento.'}
-                </p>
-                {stratAnalysis.risk && latestNotes[stratAnalysis.risk.id]?.[0] && (
-                  <div className="mb-8 p-4 rounded-xl bg-error/5 border border-error/10">
-                    <p className="text-[10px] font-black text-error uppercase tracking-widest mb-1 opacity-60">Última Atualização</p>
-                    <p className="text-xs font-manrope font-bold text-slate-600 italic">"{latestNotes[stratAnalysis.risk.id][0]}"</p>
-                  </div>
-                )}
-                <div className="mt-auto flex items-center justify-between">
-                  <span className="text-[11px] font-black text-error uppercase tracking-widest">
-                    {stratAnalysis.risk ? `Risco de perda: ${formatCurrency(stratAnalysis.risk.forecast)}` : 'Nenhum risco crítico identificado'}
-                  </span>
-                  {stratAnalysis.risk && (
-                    <button onClick={() => handleOpenDeal(stratAnalysis.risk.id)} className="text-primary text-xs font-black font-manrope uppercase tracking-widest hover:underline flex items-center gap-2">
-                      Analisar Risco
-                      <span className="material-symbols-outlined text-sm">arrow_forward</span>
-                    </button>
-                  )}
-                </div>
-              </Card>
-
-              {/* Card: Action Required */}
-              <Card variant="glass" className="p-7 border-l-4 border-l-amber-500 flex flex-col relative overflow-hidden group transition-all duration-300 hover:-translate-y-1 hover:scale-[1.01] hover:shadow-[0_20px_40px_rgba(0,0,0,0.08)]">
-                <div className="flex items-center gap-2 mb-6">
-                  <span className="bg-amber-100 text-amber-600 text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-sm">Action Required</span>
-                  <TrendingUp className="text-amber-500 w-5 h-5 ml-auto" />
-                </div>
-                <h3 className="text-lg font-manrope font-black text-on-surface mb-0.5 tracking-tight group-hover:text-amber-600 transition-colors">
-                  {stratAnalysis.action?.title || 'Ações em dia'}
-                </h3>
-                {stratAnalysis.action && (
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">
-                    {stratAnalysis.action.company}
-                  </p>
-                )}
-                <p className="text-sm font-manrope font-bold text-slate-500 leading-relaxed mb-8 opacity-70">
-                  {stratAnalysis.action 
-                    ? `Oportunidade em estágio avançado. Este negócio pode contribuir diretamente para a meta do mês.`
-                    : 'Todas as ações estratégicas prioritárias para negócios qualificados foram concluídas.'}
-                </p>
-                <div className="mt-auto flex items-center justify-between">
-                  <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest">
-                    {stratAnalysis.action ? `Potencial de avanço: ${formatCurrency(stratAnalysis.action.forecast)} (${stratAnalysis.action.score}%)` : 'Sem pendências'}
-                  </span>
-                  {stratAnalysis.action && (
-                    <button onClick={() => handleOpenDeal(stratAnalysis.action.id)} className="text-primary text-xs font-black font-manrope uppercase tracking-widest hover:underline flex items-center gap-2">
-                      Executar Ação
-                      <span className="material-symbols-outlined text-sm">edit_document</span>
-                    </button>
-                  )}
-                </div>
-              </Card>
-
-              {/* Full width lower card: Hot Opportunity */}
-              <Card variant="glass" className="p-7 border-l-4 border-l-emerald-500 flex justify-between gap-10 relative overflow-hidden group col-span-1 md:col-span-2 transition-all duration-300 hover:-translate-y-1 hover:scale-[1.01] hover:shadow-[0_20px_40px_rgba(0,0,0,0.08)]">
-                <div className="flex-1 flex flex-col">
-                  <div className="flex items-center gap-2 mb-6">
-                    <span className="bg-emerald-100 text-emerald-600 text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-sm">Hot Opportunity</span>
-                    <Trophy className="text-emerald-500 w-5 h-5 ml-auto" />
-                  </div>
-                  <h3 className="text-xl font-manrope font-black text-on-surface mb-0.5 tracking-tight group-hover:text-emerald-600 transition-colors">
-                    {stratAnalysis.hot?.title || 'Pipeline sem oportunidades de alto impacto no momento'}
-                  </h3>
-                  {stratAnalysis.hot && (
-                    <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-6">
-                      {stratAnalysis.hot.company}
-                    </p>
-                  )}
-                  <p className="text-base font-manrope font-bold text-slate-500 leading-relaxed mb-10 max-w-xl opacity-70">
-                    {stratAnalysis.hot 
-                      ? `Esta oportunidade possui ${stratAnalysis.hot.score}% de probabilidade de fechamento. Foque neste deal para acelerar o atingimento da meta.`
-                      : 'Adicione ou avance negócios para aumentar o forecast.'}
-                  </p>
-                  <div className="mt-auto flex items-center gap-6">
-                    {stratAnalysis.hot && (
-                      <button onClick={() => handleOpenDeal(stratAnalysis.hot.id)} className="bg-emerald-500 hover:bg-emerald-600 text-white px-8 py-3 rounded-2xl text-[11px] font-black font-manrope uppercase tracking-widest transition-all shadow-lg shadow-emerald-200 active:scale-95">
-                        Focar no Fechamento
-                      </button>
-                    )}
-                    <span className="text-[11px] font-black text-emerald-600 uppercase tracking-widest">
-                      {stratAnalysis.hot 
-                        ? `Impacta ${metaValue > 0 ? ((stratAnalysis.hot.forecast / metaValue) * 100).toFixed(1) : 0}% da meta` 
-                        : 'Impacto atual no forecast: abaixo do necessário para atingir a meta'}
-                    </span>
-                  </div>
-                </div>
-                {/* Decorative right side graphic block */}
-                <div className="w-2/5 hidden md:block rounded-[2rem] overflow-hidden relative border border-white/40 shadow-inner group-hover:scale-[1.02] transition-transform duration-500">
-                   <img src="https://images.unsplash.com/photo-1542744173-8e7e53415bb0?q=80&w=800&auto=format&fit=crop" className="w-full h-full object-cover opacity-90 grayscale group-hover:grayscale-0 transition-all duration-700" alt="Office" />
-                   <div className="absolute inset-0 bg-gradient-to-l from-transparent via-white/10 to-white/60"></div>
-                </div>
-              </Card>
+            <div className="w-full">
+              <ActionableDeals 
+                onOpenDeal={handleOpenDeal} 
+                isPipelineInsufficient={metrics.isUnrealistic || metrics.isMetaImpossible}
+              />
             </div>
           </section>
         </div>
 
+        <div className="col-span-12 xl:col-span-4 flex flex-col gap-8 relative z-20">
+          {/* 🔥 FILA DE PRIORIDADE (Ação Imediata) */}
+          <PriorityQueue deals={deals} onOpenDeal={handleOpenDeal} />
 
-        {/* Sidebar */}
-        <div className="col-span-12 xl:col-span-4">
-          <OracleInsight onOpenDeal={handleOpenDeal} />
+          {/* 🧠 PLAYBOOK INSIGHTS (O que funciona?) */}
+          <PlaybookInsights />
+
+          {/* Central de Performance e Saúde da IA */}
+          <IAPerformance />
+
+          {/* O Oráculo (Insight Ativo) */}
+          <OracleInsight 
+            dealId={stratAnalysis.hot?.id}
+            dealTitle={stratAnalysis.hot?.title}
+            messageId={stratAnalysis.hot?.lastAIMessageId}
+            dealInsight={stratAnalysis.hot?.lastAIInsight}
+            onAction={(action) => handleOpenDeal(stratAnalysis.hot?.id)} 
+            onCopy={(msg) => navigator.clipboard.writeText(msg)}
+          />
         </div>
       </div>
 
-      {viewingDeal && (
-        <DealDetailsModal 
-          isOpen={detailsModalOpen} 
-          onClose={() => {
-            setDetailsModalOpen(false);
-            setViewingDeal(null);
-          }} 
-          deal={viewingDeal}
-          onUpdate={refetch}
-        />
+      {/* Closing Plan Modal (Slide-over/Modal) */}
+      {planModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+            <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-primary/5">
+              <div>
+                <h3 className="text-2xl font-manrope font-black text-on-surface tracking-tight">Plano de Fechamento</h3>
+                <p className={`text-sm font-bold ${metrics.isUnrealistic ? 'text-error' : 'text-slate-500'}`}>
+                  {metrics.isUnrealistic 
+                    ? 'Alerta: Pipeline insuficiente para a meta. Priorize estes deals:' 
+                    : 'Negócios decisivos para bater a meta'}
+                </p>
+              </div>
+              <button onClick={() => setPlanModalOpen(false)} className="p-2 hover:bg-white rounded-full transition-colors">
+                <X className="w-6 h-6 text-slate-400" />
+              </button>
+            </div>
+            
+            <div className="p-8 max-h-[60vh] overflow-y-auto flex flex-col gap-4">
+              {metrics.topDealsToClose.map((deal) => (
+                <div 
+                  key={deal.id} 
+                  onClick={() => handleOpenDeal(deal.id)}
+                  className="p-6 rounded-[2rem] border border-slate-100 bg-white/50 backdrop-blur-sm hover:border-primary/20 hover:bg-white hover:shadow-xl hover:shadow-primary/5 transition-all flex items-center justify-between group cursor-pointer active:scale-[0.98]"
+                >
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-1.5">
+                       <div className="w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+                       <p className="text-sm font-manrope font-black text-on-surface group-hover:text-primary transition-colors">
+                         {deal.title}
+                       </p>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{deal.company || 'Oportunidade'}</p>
+                      <div className="flex items-center gap-1.5 bg-primary/5 px-3 py-1 rounded-full">
+                        <span className="text-[9px] font-black text-primary uppercase tracking-wider">{deal.score}% Score</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-6">
+                    <div className="text-right">
+                      <p className="text-lg font-manrope font-black text-on-surface leading-none tracking-tighter">
+                        {formatCurrency(deal.value || 0)}
+                      </p>
+                    </div>
+                    
+                    <Avatar 
+                      src={deal.ownerAvatar || null} 
+                      name={deal.ownerName || 'Staff'} 
+                      size="sm" 
+                      className="w-9 h-9 border-white shadow-lg ring-1 ring-black/5"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="p-8 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+              <div className="flex flex-col">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Impacto Combinado</p>
+                <p className="text-xl font-manrope font-black text-on-surface">{formatCurrency(metrics.topDealsToClose.reduce((acc, d) => acc + d.forecast, 0))}</p>
+              </div>
+              <button onClick={() => setPlanModalOpen(false)} className="bg-slate-900 text-white px-8 py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all">
+                Fechar Plano
+              </button>
+            </div>
+          </div>
+        </div>
       )}
+
+      <DealDetailsModal 
+        isOpen={detailsModalOpen} 
+        onClose={() => {
+          setDetailsModalOpen(false);
+          setViewingDeal(null);
+        }} 
+        deal={viewingDeal}
+        onUpdate={refetch}
+      />
     </div>
   );
 }

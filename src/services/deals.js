@@ -5,6 +5,7 @@
 import { supabase } from '@/lib/supabase';
 import { PIPELINE_STAGES } from '@/constants/config';
 import { getUserPermissions } from './auth';
+import { attributeAISuccess } from './aiTracking';
 
 /**
  * Utilitário para converter a coluna "product" (Texto ou JSON) em array de objetos.
@@ -94,9 +95,89 @@ export async function getDeals() {
       updatedAt:   deal.updated_at,
       products:    products,
       contacts:    contacts, 
-      qualification: deal.qualification ? (typeof deal.qualification === 'string' ? JSON.parse(deal.qualification) : deal.qualification) : {}
+      qualification: typeof deal.qualification === 'string' ? JSON.parse(deal.qualification) : (deal.qualification || {}),
+      ai_closing_probability: deal.ai_closing_probability || 0,
+      ai_probability_delta: deal.ai_probability_delta || 0,
+      ai_temperature: deal.ai_temperature || 'neutral',
+      ai_objection_pattern: deal.ai_objection_pattern || null,
+      ai_next_step_timing: deal.ai_next_step_timing || null,
+      ai_last_analysis_at: deal.ai_last_analysis_at || null,
+      ai_priority_score: deal.ai_priority_score || 0,
+      is_qualified: deal.is_qualified ?? true, // Fallback true para dados antigos
+      last_interaction_at: deal.last_interaction_at || deal.created_at,
+      lastAIInsight: deal.last_ai_insight ? (typeof deal.last_ai_insight === 'string' ? JSON.parse(deal.last_ai_insight) : deal.last_ai_insight) : null,
+      lastAIInsightAt: deal.last_ai_insight_at,
+      lastAIMessageId: deal.last_ai_message_id
     };
   });
+}
+
+/**
+ * Busca um único negócio pelo ID com toda a normalização Elite.
+ */
+export async function getDeal(id) {
+  const { orgId } = await getUserPermissions();
+
+  const { data: allStages } = await supabase
+    .from('pipeline_stages')
+    .select('id, label');
+  
+  const stageMap = {};
+  if (allStages) {
+    allStages.forEach(s => stageMap[s.id] = s.label);
+  }
+
+  const { data: deal, error } = await supabase
+    .from('deals')
+    .select(`
+      *,
+      companies ( name, cnpj, segment ),
+      responsible:profiles!responsible_id ( full_name, avatar_url ),
+      contacts:deal_contacts(
+        contact:contacts(*)
+      )
+    `)
+    .eq('org_id', orgId)
+    .eq('id', id)
+    .single();
+
+  if (error) throw error;
+  if (!deal) return null;
+
+  const products = parseProducts(deal.product, deal.value, deal.title);
+  const contacts = deal.contacts ? deal.contacts.map(c => c.contact).filter(Boolean) : [];
+
+  return {
+    id:          deal.id,
+    title:       deal.title,
+    company:     deal.companies?.name || 'Sem Empresa',
+    taxId:       deal.companies?.cnpj || '',
+    segment:     deal.companies?.segment || '',
+    value:       deal.value ?? 0,
+    stage:       deal.stage ?? 'lead',
+    stageLabel:  stageMap[deal.stage] || deal.stage, 
+    status:      deal.status || 'open',
+    tags:        products.length > 0 ? [products[0].name] : [],
+    ownerName:   deal.responsible?.full_name || 'Desconhecido',
+    ownerAvatar: deal.responsible?.avatar_url || null,
+    createdAt:   deal.created_at,
+    updatedAt:   deal.updated_at,
+    products:    products,
+    contacts:    contacts, 
+    qualification: typeof deal.qualification === 'string' ? JSON.parse(deal.qualification) : (deal.qualification || {}),
+    ai_closing_probability: deal.ai_closing_probability || 0,
+    ai_probability_delta: deal.ai_probability_delta || 0,
+    ai_temperature: deal.ai_temperature || 'neutral',
+    ai_objection_pattern: deal.ai_objection_pattern || null,
+    ai_next_step_timing: deal.ai_next_step_timing || null,
+    ai_last_analysis_at: deal.ai_last_analysis_at || null,
+    ai_priority_score: deal.ai_priority_score || 0,
+    is_qualified: deal.is_qualified ?? true,
+    last_interaction_at: deal.last_interaction_at || deal.created_at,
+    lastAIInsight: deal.last_ai_insight ? (typeof deal.last_ai_insight === 'string' ? JSON.parse(deal.last_ai_insight) : deal.last_ai_insight) : null,
+    lastAIInsightAt: deal.last_ai_insight_at,
+    lastAIMessageId: deal.last_ai_message_id
+  };
 }
 
 /**
@@ -144,7 +225,8 @@ export async function createDeal(payload) {
        product: JSON.stringify(payload.products || []), 
        company_id: companyId,
        responsible_id: userId,
-       org_id: orgId
+       org_id: orgId,
+       is_qualified: payload.is_qualified ?? true // Manually created are qualified by default
     }])
     .select()
     .single();
@@ -203,7 +285,8 @@ export async function updateDeal(id, payload) {
     stage: payload.stage,
     status: payload.status,
     product: payload.products ? JSON.stringify(payload.products) : null,
-    qualification: payload.qualification ? (typeof payload.qualification === 'string' ? payload.qualification : JSON.stringify(payload.qualification)) : null
+    qualification: payload.qualification || {},
+    is_qualified: payload.is_qualified !== undefined ? payload.is_qualified : undefined
   };
 
   const { data: updatedDeal, error: dealError } = await supabase
@@ -214,6 +297,19 @@ export async function updateDeal(id, payload) {
     .single();
 
   if (dealError) throw dealError;
+
+  // [PHASE 5 ELITE] - Atribuição de Upsell
+  if (payload.value > 0 && payload.value !== undefined) {
+      const { checkAndTrackAIUpsell } = await import('./aiTracking');
+      // Buscamos o valor anterior do deal retornado no snapshot inicial ou simulado
+      // Para precisão, o checkAndTrackAIUpsell lidará com a comparação se o valor subiu.
+      await checkAndTrackAIUpsell(id, payload.previous_value || 0, payload.value);
+  }
+
+  // [PHASE 5 ELITE] - Atribuição de Sucesso do Playbook
+  if (payload.status === 'won' || payload.stage) {
+      await attributeAISuccess(id);
+  }
 
   // 2. Atualizar Dados da Empresa (CNPJ e Segmento)
   if (updatedDeal.company_id && (payload.taxId || payload.segment)) {
@@ -327,6 +423,9 @@ export async function moveDealStage(id, newStage) {
     .single();
 
   if (error) throw error;
+
+  // [PHASE 5 ELITE] - Atribuição de Sucesso ao avançar estágio
+  await attributeAISuccess(id);
 
   // Registrar na deal_timeline automaticamente
   const stageLabel = PIPELINE_STAGES.find(s => s.id === newStage)?.label || newStage;

@@ -1,9 +1,10 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Card, Button } from '@/components/ui';
-import { Mail, MessageCircle, Calendar, Shield, Cpu, Zap } from 'lucide-react';
+import { Mail, MessageCircle, Calendar, Shield, Cpu, Zap, ChevronLeft } from 'lucide-react';
+import { AIAnalyticsView } from '@/components/settings/AIAnalyticsView';
 
-const IntegrationCard = ({ icon: Icon, title, description, badge, color, status = 'disponível' }) => (
+const IntegrationCard = ({ icon: Icon, title, description, badge, color, status = 'disponível', onConfigure }) => (
   <Card className="p-8 bg-white border-slate-100 hover:shadow-2xl hover:scale-[1.02] transition-all group overflow-hidden relative">
     <div className={`absolute top-0 right-10 w-24 h-24 rounded-full opacity-5 blur-2xl ${color}`} />
     
@@ -23,7 +24,12 @@ const IntegrationCard = ({ icon: Icon, title, description, badge, color, status 
       <div className="flex gap-2">
          {badge && <span className="text-[10px] font-bold text-primary bg-primary/5 px-2 py-0.5 rounded-lg">{badge}</span>}
       </div>
-      <Button variant="outline" size="sm" className="h-9 px-6 rounded-xl text-[10px] font-black uppercase tracking-widest group-hover:bg-primary group-hover:text-white transition-all">
+      <Button 
+        onClick={onConfigure}
+        variant="outline" 
+        size="sm" 
+        className="h-9 px-6 rounded-xl text-[10px] font-black uppercase tracking-widest group-hover:bg-primary group-hover:text-white transition-all"
+      >
         Configurar
       </Button>
     </div>
@@ -31,6 +37,23 @@ const IntegrationCard = ({ icon: Icon, title, description, badge, color, status 
 );
 
 export const IntegrationsTab = () => {
+  const [activeView, setActiveView] = React.useState('grid');
+
+  if (activeView === 'ia-analytics') {
+    return (
+      <div className="space-y-8">
+        <button 
+            onClick={() => setActiveView('grid')}
+            className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-primary transition-colors mb-4"
+        >
+            <ChevronLeft className="w-4 h-4" />
+            Voltar para Integrações
+        </button>
+        <AIAnalyticsView />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-12 pb-20">
       
@@ -89,8 +112,9 @@ export const IntegrationsTab = () => {
           title="IA Preditiva"
           description="Análise automática de leads e sugestão de próximas ações baseada no histórico de conversão da equipe."
           color="text-sky-500 bg-sky-500"
-          badge="Em Breve"
-          status="beta"
+          badge="Enterprise"
+          status="ativo"
+          onConfigure={() => setActiveView('ia-analytics')}
         />
 
       </div>

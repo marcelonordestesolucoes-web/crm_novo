@@ -23,9 +23,11 @@ export const formatDate = (date) =>
 export const NAV_ITEMS = [
   { id: 'home',      label: 'Início',    icon: 'home',       path: '/' },
   { id: 'pipeline',  label: 'Pipeline',  icon: 'analytics',  path: '/pipeline' },
+  { id: 'conversas', label: 'Conversas', icon: 'chat',       path: '/conversas' },
   { id: 'empresas',  label: 'Empresas',  icon: 'business',   path: '/empresas' },
   { id: 'contatos',  label: 'Contatos',  icon: 'contacts',   path: '/contatos' },
   { id: 'tarefas',   label: 'Tarefas',   icon: 'task_alt',   path: '/tarefas' },
+  { id: 'campanhas', label: 'Campanhas', icon: 'campaign',   path: '/campanhas' },
   { id: 'analytics', label: 'Analytics', icon: 'monitoring', path: '/analytics' },
 ];
 
@@ -100,6 +102,7 @@ export const ROUTES = {
   EMPRESAS:  '/empresas',
   CONTATOS:  '/contatos',
   TAREFAS:   '/tarefas',
+  CAMPANHAS: '/campanhas',
   ANALYTICS: '/analytics',
   CONFIGURACOES: '/configuracoes',
 };

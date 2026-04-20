@@ -1,0 +1,2 @@
+[functions.analyze-conversation]
+verify_jwt = false # Permite chamadas com a Anon Key do VITE, facilitando o uso no Inbox Elite

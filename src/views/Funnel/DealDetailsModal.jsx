@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSupabase } from '@/hooks/useSupabase';
-import { getDealTimeline, moveDealStage, updateDeal, deleteDeal } from '@/services/deals';
+import { getDealTimeline, moveDealStage, updateDeal, deleteDeal, getDeal } from '@/services/deals';
 import { getTasksByDeal, toggleTaskStatus, createTask } from '@/services/tasks';
 import { getNotesByDeal, createNote, updateNote, deleteNote } from '@/services/notes';
 import { getAttachmentsByDeal, uploadAttachment, deleteAttachment } from '@/services/attachments';
@@ -13,6 +13,9 @@ import { DealQualificationChecklist } from './DealQualificationChecklist';
 import { calculateDealRisk } from '@/utils/dealRisk';
 import { getPipelines, getPipelineStages } from '@/services/pipelines';
 import { transferDealToPipeline } from '@/services/deals';
+import { getConversationsByDeal, createConversation } from '@/services/conversations';
+import { trackUserEvent } from '@/services/aiTracking';
+import { supabase } from '@/lib/supabase';
 import { ChevronRight, FileText, ArrowRightLeft } from 'lucide-react';
 
 export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) => {
@@ -20,6 +23,8 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
   const [taskLoading, setTaskLoading] = useState(false);
   const [noteLoading, setNoteLoading] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
+  const [convLoading, setConvLoading] = useState(false);
+  const [currentDeal, setCurrentDeal] = useState(deal);
   
   const [newTask, setNewTask] = useState({
     title: '',
@@ -31,6 +36,14 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
 
   const [newNote, setNewNote] = useState('');
   const [editingNote, setEditingNote] = useState(null);
+
+  // Estado para o Chat Hub (v7.1)
+  const [localConversations, setLocalConversations] = useState([]);
+  const [hasNewUnread, setHasNewUnread] = useState(false);
+  const scrollRef = React.useRef(null);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [showScrollPrompt, setShowScrollPrompt] = useState(false);
+  const [newConversationText, setNewConversationText] = useState('');
 
   // Normalização para comparação estável
   const getNormalizedData = (d) => ({
@@ -49,6 +62,7 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
 
   // Transfer State
   const [isTransferOpen, setIsTransferOpen] = useState(false);
+  const [analyzingIds, setAnalyzingIds] = useState(new Set());
   const [availablePipelines, setAvailablePipelines] = useState([]);
   const [transferData, setTransferData] = useState({
     pipelineId: '',
@@ -62,38 +76,133 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
   const { data: tasks, loading: loadingTasks, refetch: refetchTasks } = useSupabase(() => deal?.id ? getTasksByDeal(deal.id) : Promise.resolve([]), [deal?.id, isOpen]);
   const { data: notes, loading: loadingNotes, refetch: refetchNotes } = useSupabase(() => deal?.id ? getNotesByDeal(deal.id) : Promise.resolve([]), [deal?.id, isOpen]);
   const { data: attachments, loading: loadingFiles, refetch: refetchFiles } = useSupabase(() => deal?.id ? getAttachmentsByDeal(deal.id) : Promise.resolve([]), [deal?.id, isOpen]);
+  const { data: conversations, loading: loadingConversations, refetch: refetchConversations } = useSupabase(() => deal?.id ? getConversationsByDeal(deal.id) : Promise.resolve([]), [deal?.id, isOpen]);
+
+  // SINC DE CONVERSAS LOCAIS
+  useEffect(() => {
+    if (conversations) {
+      // Ordenar por mais recente no topo ou na base? Para chat, usamos ascending: true (base)
+      const sorted = [...conversations].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      setLocalConversations(sorted.slice(-50)); // Primeiras 50 para performance
+    }
+  }, [conversations]);
+
+  // REALTIME LISTENER (v7.1 Elite)
+  useEffect(() => {
+    if (!isOpen || !deal?.id) return;
+
+    const channel = supabase
+      .channel(`chat:${deal.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'deal_conversations',
+          filter: `deal_id=eq.${deal.id}`
+        },
+        (payload) => {
+          const newMsg = payload.new;
+          
+          setLocalConversations(prev => {
+            // Deduplicação Front-end (Arquiteto v7.1)
+            const exists = prev.some(m => 
+              (m.id === newMsg.id) || 
+              (m.external_message_id && m.external_message_id === newMsg.external_message_id)
+            );
+            if (exists) return prev;
+
+            const updated = [...prev, newMsg];
+            
+            // UX: Badge de não lido
+            if (activeTab !== 'conversations') {
+               setHasNewUnread(true);
+            }
+
+            return updated;
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isOpen, deal?.id, activeTab]);
+
+  // SMART SCROLL LOGIC
+  useEffect(() => {
+    if (activeTab === 'conversations' && isAtBottom) {
+       scrollToBottom();
+       setHasNewUnread(false);
+    }
+  }, [localConversations, activeTab, isAtBottom]);
+
+  const scrollToBottom = () => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTo({
+        top: scrollRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+      setShowScrollPrompt(false);
+    }
+  };
+
+  const handleScroll = (e) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.target;
+    const isBottom = scrollHeight - scrollTop - clientHeight < 50;
+    setIsAtBottom(isBottom);
+    if (isBottom) setShowScrollPrompt(false);
+  };
 
   const hasChanges = JSON.stringify(getNormalizedData(editData)) !== JSON.stringify(getNormalizedData(deal));
 
   useEffect(() => {
     if (isOpen && deal) {
       document.body.style.overflow = 'hidden';
+      // Sincronização profunda: se o deal mudar no pai (ex: via refetch), atualizamos o estado local
       setEditData(getNormalizedData(deal));
+      setCurrentDeal(deal);
     }
     else {
       document.body.style.overflow = 'unset';
     }
     return () => { document.body.style.overflow = 'unset'; };
-  }, [isOpen, deal?.id]); // Usar deal.id em vez do objeto deal para estabilidade
+  }, [isOpen, deal]); // Observar o objeto deal inteiro para detectar mudanças do refetch pai
 
-  if (!isOpen || !deal) return null;
-
-  const handleSave = async () => {
-    setIsSaving(true);
+  const handleSave = async (customData, options = { silent: false }) => {
+    if (!options.silent) setIsSaving(true);
     try {
-      await updateDeal(deal.id, {
+      const dataToSave = customData || {
         ...deal,
         title: editData.title,
         value: editData.value,
         qualification: editData.qualification
-      });
+      };
+      await updateDeal(deal.id, dataToSave);
       if (onUpdate) onUpdate();
-      setIsSaving(false);
     } catch (err) {
-      alert('Erro ao salvar: ' + err.message);
-      setIsSaving(false);
+      console.error('Save Error:', err);
+    } finally {
+      if (!options.silent) setIsSaving(false);
     }
   };
+
+  // Autosave Elite para Qualificação (Silencioso)
+  useEffect(() => {
+    // Só executa se estiver aberto e houver deal
+    if (!isOpen || !deal) return;
+    
+    const hasQualChanges = JSON.stringify(editData.qualification) !== JSON.stringify(deal.qualification);
+    if (hasQualChanges && !isSaving) {
+      const timer = setTimeout(() => {
+        handleSave(null, { silent: true });
+      }, 2000); // 2s de debounce para ser menos intrusivo
+      return () => clearTimeout(timer);
+    }
+  }, [editData.qualification, isOpen, deal]);
+
+  if (!isOpen || !deal) return null;
 
   const activeStages = (stages && stages.length > 0) ? stages : PIPELINE_STAGES;
   const currentStageIndex = activeStages.findIndex(s => s.id.toLowerCase() === (deal.stage || '').toLowerCase());
@@ -287,6 +396,82 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
     }
   };
 
+  const handleAddConversation = async () => {
+    setConvLoading(true);
+    try {
+      const savedConversation = await createConversation(deal.id, newConversationText, 'client', 'manual');
+      setNewConversationText('');
+      
+      // DISPARAR ANÁLISE DE IA
+      handleAnalyzeConversation(savedConversation.id);
+
+      refetchConversations();
+      refetchTimeline();
+    } catch (err) {
+      alert('Erro ao salvar conversa: ' + err.message);
+    } finally {
+      setConvLoading(false);
+    }
+  };
+
+  const handleAnalyzeConversation = async (convId) => {
+    setAnalyzingIds(prev => new Set(prev).add(convId));
+    try {
+      const { data, error } = await supabase.functions.invoke('analyze-conversation', {
+        body: { conversation_id: convId, deal_id: deal.id }
+      });
+      
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error); 
+
+      // REFRESH SILENCIOSO ELITE (v4.0)
+      // Aguardamos 500ms para o banco processar a persistência
+      setTimeout(async () => {
+        if (onUpdate) onUpdate();
+        
+        // [BUG FIX] Sincronizar cabeçalho do deal
+        const updatedDeal = await getDeal(deal.id);
+        if (updatedDeal) setCurrentDeal(updatedDeal);
+
+        refetchConversations();
+        
+        // [PHASE 5 ELITE] - Rastrear que uma sugestão foi gerada
+        const updatedConvs = await getConversationsByDeal(deal.id);
+        const newMsg = (updatedConvs || []).find(c => c.id === convId);
+        if (newMsg?.metadata?.ai_analysis?.strategy_category) {
+            await trackUserEvent(deal.id, 'ai_action_suggested', { 
+                category: newMsg.metadata.ai_analysis.strategy_category 
+            });
+        }
+      }, 500);
+
+    } catch (err) {
+      console.error('AI Analysis Trigger Failed:', err);
+      // Fallback: marcar como falha para o usuário não ficar esperando
+      refetchConversations();
+    } finally {
+      setAnalyzingIds(prev => {
+        const next = new Set(prev);
+        next.delete(convId);
+        return next;
+      });
+    }
+  };
+
+  const handleApplySuggestion = (suggestion) => {
+    if (!suggestion) return;
+    setNewConversationText(suggestion);
+    // Feedback tátil visual: focar o input se possível, ou apenas piscar
+    const input = document.querySelector('textarea[placeholder*="Digite uma mensagem"]');
+    if (input) {
+      input.focus();
+      input.animate([
+        { backgroundColor: 'rgba(0, 62, 199, 0.1)' },
+        { backgroundColor: 'transparent' }
+      ], { duration: 600 });
+    }
+  };
+
   const tabs = [
     { id: 'overview', label: 'Visão Geral' },
     { id: 'timeline', label: 'Histórico' },
@@ -327,7 +512,7 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
                       className="text-3xl font-manrope font-black text-on-surface tracking-tight bg-transparent border-0 p-0 focus:ring-0 w-full hover:bg-black/5 rounded-lg transition-colors"
                     />
                     <Badge 
-                      label={activeStages.find(s => s.id.toLowerCase() === (deal.stage || '').toLowerCase())?.label || deal.stage} 
+                      label={activeStages.find(s => s.id.toLowerCase() === (currentDeal.stage || '').toLowerCase())?.label || currentDeal.stage} 
                       className={cn("px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border border-white/40", isWon ? 'bg-emerald-100 text-emerald-700' : isLost ? 'bg-red-100 text-red-700' : 'bg-primary-fixed text-on-primary-fixed')}
                     />
                   </div>
@@ -389,8 +574,70 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
             <div className="flex-1 overflow-hidden flex bg-transparent">
               {/* Main Content (68%) */}
               <div className="w-[68%] overflow-y-auto border-r border-white/10 flex flex-col scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+                {/* ELITE STRATEGY HEADER (v4.0) */}
+                <div className="px-12 pt-8 pb-4 bg-white/40 border-b border-white/10 flex items-center justify-between">
+                   <div className="flex items-center gap-6">
+                      <div className="flex flex-col">
+                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Score do Deal</span>
+                         <div className="flex items-center gap-2">
+                            <span className="text-3xl font-manrope font-black text-on-surface">
+                               {currentDeal.ai_closing_probability || 0}%
+                            </span>
+                            {(() => {
+                               const delta = currentDeal.ai_probability_delta || 0;
+                               const isPos = delta > 0;
+                               const isNeg = delta < 0;
+                               return (
+                                  <span className={cn(
+                                     "text-[11px] font-black px-2 py-0.5 rounded-full flex items-center gap-1",
+                                     isPos ? "bg-emerald-100 text-emerald-600" : 
+                                     isNeg ? "bg-rose-100 text-rose-600" : 
+                                     "bg-slate-100 text-slate-400"
+                                  )}>
+                                     {isPos ? '↑' : isNeg ? '↓' : '—'} 
+                                     {Math.abs(delta)}%
+                                  </span>
+                               );
+                            })()}
+                         </div>
+                      </div>
+
+                      <div className="w-px h-10 bg-slate-200/50" />
+
+                      <div className="flex flex-col">
+                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Temperatura</span>
+                         {(() => {
+                            const temp = (currentDeal.ai_temperature || 'cool').toLowerCase();
+                            const configs = {
+                               hot: { label: 'Alta probabilidade', color: 'bg-emerald-500 text-white', icon: '🔥' },
+                               warm: { label: 'Em evolução', color: 'bg-blue-500 text-white', icon: '☀️' },
+                               cool: { label: 'Neutro', color: 'bg-slate-100 text-slate-500 border border-slate-200', icon: '❄️' },
+                               risk: { label: 'Atenção', color: 'bg-rose-500 text-white', icon: '⚠️' }
+                            };
+                            const config = configs[temp] || configs.cool;
+                            
+                            return (
+                               <div className={cn("px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-sm", config.color)}>
+                                  <span>{config.icon}</span>
+                                  {config.label}
+                               </div>
+                            );
+                         })()}
+                      </div>
+                   </div>
+
+                   <div className="flex items-center gap-3">
+                      <div className="text-right">
+                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Última Análise</p>
+                         <p className="text-[10px] font-bold text-slate-500">
+                            {currentDeal.ai_last_analysis_at ? formatDate(currentDeal.ai_last_analysis_at) : 'Pendente'}
+                         </p>
+                      </div>
+                   </div>
+                </div>
+
                 {/* Tabs Navigation - STICKY FIX */}
-                <div className="flex gap-10 border-b border-white/10 px-12 sticky top-0 bg-white/60 backdrop-blur-2xl z-10 pt-6">
+                <div className="flex gap-10 border-b border-white/10 px-12 sticky top-0 bg-white/60 backdrop-blur-2xl z-10 pt-4">
                   {tabs.map(tab => (
                     <button 
                       key={tab.id}
@@ -472,6 +719,8 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
                                   return { label: 'Anotação', icon: 'sticky_note_2', color: 'text-amber-500', dot: 'bg-amber-500' };
                                 case 'attachment':
                                   return { label: 'Arquivo', icon: 'attach_file', color: 'text-indigo-500', dot: 'bg-indigo-500' };
+                                case 'whatsapp_interaction':
+                                  return { label: 'Interação WhatsApp', icon: 'chat', color: 'text-emerald-500', dot: 'bg-emerald-500', actionable: true };
                                 case 'created':
                                   return { label: 'Novo Negócio', icon: 'new_releases', color: 'text-primary', dot: 'bg-primary' };
                                 default:
@@ -492,6 +741,15 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
                                     </div>
                                   </div>
                                   <p className="text-base text-on-surface font-semibold leading-relaxed opacity-90">{event.description}</p>
+                                  {details.actionable && (
+                                    <button 
+                                      onClick={() => window.location.href='/conversas'} 
+                                      className="mt-4 flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-emerald-600 hover:text-emerald-700 transition-colors"
+                                    >
+                                      Continuar Conversa no Chat Hub
+                                      <ChevronRight className="w-3 h-3" />
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             );
@@ -744,85 +1002,34 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
                       )}
                     </div>
                   )}
+                  </div>
                 </div>
-              </div>
 
-              {/* Sidebar Insights (32%) - Oracle Style AI */}
-              <div className="w-[32%] p-10 bg-white/20 backdrop-blur-md overflow-y-auto space-y-8 h-full scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
-                {(() => {
-                  const riskInfo = calculateDealRisk(editData.qualification);
-                  const hasData = Object.keys(editData.qualification || {}).length > 0;
-                  
-                  let headline = "Qualificação Pendente";
-                  let description = "Este negócio ainda não possui dados de qualificação básicos. Preencha o questionário ao lado para liberar a análise estratégica.";
-                  let nextStep = "Preencher questionário";
-                  let cardStyle = "from-slate-400/20 to-slate-200/10 border-white/20";
-                  let iconColor = "text-slate-400";
-
-                  if (hasData) {
-                    if (riskInfo?.risk === 'high') {
-                      headline = "Atenção: Risco Detectado";
-                      const missingParts = [];
-                      if (!editData.qualification.budget) missingParts.push("orçamento");
-                      if (!editData.qualification.decisionMaker) missingParts.push("decisor");
-                      if (!editData.qualification.urgency) missingParts.push("urgência");
-                      
-                      description = `Identificamos lacunas críticas em: ${missingParts.join(', ')}. A probabilidade de fechamento é baixa sem validar estes pilares essenciais.`;
-                      nextStep = !editData.qualification.decisionMaker ? "Agendar com Decisor" : "Validar Orçamento";
-                      cardStyle = "from-error/20 to-error/5 border-error/20";
-                      iconColor = "text-error";
-                    } else if (riskInfo?.risk === 'medium') {
-                      headline = "Ciclo em Evolução";
-                      description = "O negócio demonstra tração, mas possui pontos de fricção parcial. Recomendamos manter o engajamento próximo para fechar os dados restantes.";
-                      nextStep = "Confirmar Próximos Passos";
-                      cardStyle = "from-amber-500/20 to-amber-200/5 border-amber-200/20";
-                      iconColor = "text-amber-500";
-                    } else {
-                      headline = "Excelente Saúde";
-                      description = "Padrões de conversão sólidos detectados! Os pilares de orçamento e decisão estão validados, favorecendo um fechamento acelerado.";
-                      nextStep = "Gerar Proposta/Minuta";
-                      cardStyle = "from-primary/20 to-primary-container/10 border-white/40";
-                      iconColor = "text-primary";
-                    }
-                  }
-
-                  return (
-                    <>
-                      <div className={cn("p-8 rounded-[3rem] bg-gradient-to-br border relative overflow-hidden shadow-2xl transition-all cursor-default group/oracle", cardStyle)}>
-                        <div className={cn("flex items-center gap-2 mb-6 relative z-10 transition-colors", iconColor)}>
-                          <span className="material-symbols-outlined text-2xl" style={{ fontVariationSettings: "'FILL' 1" }}>bolt</span>
-                          <span className="font-extrabold text-[10px] uppercase tracking-[0.3em]">Oracle Insight IA</span>
-                        </div>
-                        <h5 className="font-manrope font-black text-on-surface mb-4 italic relative z-10 text-xl tracking-tight leading-tight">"{headline}"</h5>
-                        <p className="text-sm text-slate-600 leading-[1.8] relative z-10 opacity-90 font-inter">
-                          {description}
-                        </p>
-                        <div className="mt-8 relative z-10">
-                          <div className="p-5 bg-white/70 backdrop-blur-xl rounded-2xl border border-white/80 shadow-sm group">
-                            <p className="text-[9px] font-extrabold text-slate-400 uppercase tracking-[0.2em] mb-2 opacity-60">Próximo Passo Estratégico</p>
-                            <p className={cn("text-xs font-black group-hover:underline", iconColor)}>{nextStep}</p>
-                          </div>
-                        </div>
+                {/* Sidebar Business Intelligence (32%) */}
+                <div className="w-[32%] p-10 bg-white/20 backdrop-blur-md overflow-y-auto space-y-8 h-full scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+                  <div className="space-y-4">
+                    <h5 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest px-2 opacity-60">Stakeholders do Negócio</h5>
+                    <div className="flex items-center gap-4 p-5 bg-white/40 backdrop-blur-sm rounded-[2.5rem] border border-white/40 shadow-sm hover:shadow-2xl transition-all group">
+                      <img alt="Ficha" className="w-12 h-12 rounded-full border-4 border-white/60 shadow-md transition-transform group-hover:rotate-6" src={`https://ui-avatars.com/api/?name=${encodeURIComponent(deal.ownerName)}&background=003ec7&color=fff`} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-base font-manrope font-black text-on-surface truncate tracking-tight">{deal.ownerName}</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-widest font-bold opacity-60">Lead Sales Strategist</p>
                       </div>
+                    </div>
+                  </div>
 
-                      <div className="space-y-4 pt-4">
-                        <h5 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest px-2 opacity-60">Stakeholders do Negócio</h5>
-                        <div className="flex items-center gap-4 p-5 bg-white/40 backdrop-blur-sm rounded-[2.5rem] border border-white/40 shadow-sm hover:shadow-2xl transition-all group">
-                          <img alt="Ficha" className="w-12 h-12 rounded-full border-4 border-white/60 shadow-md transition-transform group-hover:rotate-6" src={`https://ui-avatars.com/api/?name=${encodeURIComponent(deal.ownerName)}&background=003ec7&color=fff`} />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-base font-manrope font-black text-on-surface truncate tracking-tight">{deal.ownerName}</p>
-                            <p className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-widest font-bold opacity-60">Lead Sales Strategist</p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="p-8 rounded-[3rem] bg-white/40 backdrop-blur-sm border border-white/40 mt-4 shadow-sm hover:shadow-2xl transition-all cursor-default overflow-hidden relative group/matriz">
+                  {(() => {
+                    const riskInfo = calculateDealRisk(editData.qualification);
+                    const hasData = Object.keys(editData.qualification || {}).length > 0;
+                    
+                    return (
+                      <div className="p-8 rounded-[3rem] bg-white/40 backdrop-blur-sm border border-white/40 shadow-sm hover:shadow-2xl transition-all cursor-default overflow-hidden relative group/matriz">
                         <div className="absolute top-0 right-0 w-24 h-24 bg-white/20 rounded-full -mr-10 -mt-10 opacity-50 transition-transform group-hover/matriz:scale-150 duration-700" />
-                        <h5 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-8 relative">Matriz de Risco</h5>
+                        <h5 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-8 relative">Integridade do Negócio</h5>
                         <div className="space-y-6 relative">
                           <div className="space-y-3">
                             <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
-                              <span className="text-slate-400">Integridade dos Dados</span>
+                              <span className="text-slate-400">Dados de Qualificação</span>
                               <span className={cn(hasData ? "text-primary" : "text-slate-300")}>
                                 {hasData ? "VALIDADO / 100%" : "PENDENTE / 0%"}
                               </span>
@@ -834,9 +1041,9 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
                           
                           <div className="space-y-3 pt-2">
                              <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
-                              <span className="text-slate-400">Confirmação Orçamentária</span>
+                              <span className="text-slate-400">Segurança Orçamentária</span>
                               <span className={cn(editData.qualification.budget ? "text-emerald-500" : "text-error")}>
-                                {editData.qualification.budget ? "OK / VALIDADO" : "PENDENTE / ALERTA"}
+                                {editData.qualification.budget ? "OK" : "ALERTA"}
                               </span>
                             </div>
                             <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
@@ -845,13 +1052,11 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
                           </div>
                         </div>
                       </div>
-                    </>
-                  );
-                })()}
+                    );
+                  })()}
+                </div>
               </div>
-
-            </div>
-          </motion.div>
+            </motion.div>
 
           {/* Transfer Overlay */}
           <AnimatePresence>

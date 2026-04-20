@@ -28,7 +28,6 @@ export const DealForm = ({ initialData, onSuccess, onCancel }) => {
   useEffect(() => {
     if (initialData) {
       const initialProducts = initialData.products || [];
-      // Recalcular o valor total com base nos preços dos produtos para garantir sincronia
       const calculatedTotal = initialProducts.reduce((sum, p) => sum + Number(p.price || 0), 0);
       
       setFormData({
@@ -43,6 +42,20 @@ export const DealForm = ({ initialData, onSuccess, onCancel }) => {
                   [{ name: '', role: '', phone: '', email: '' }],
         stage: initialData.stage || 'lead',
         status: initialData.status || 'new',
+      });
+    } else {
+      // Reset completo se não houver data (Fallback de segurança)
+      setFormData({
+        title: '',
+        company: '',
+        taxId: '',
+        segment: '',
+        leadSource: LEAD_SOURCES[0],
+        products: [],
+        totalValue: 0,
+        contacts: [{ name: '', role: '', phone: '', email: '' }],
+        stage: 'lead',
+        status: 'new'
       });
     }
   }, [initialData]);
@@ -95,6 +108,7 @@ export const DealForm = ({ initialData, onSuccess, onCancel }) => {
     const dealPayload = {
       ...formData,
       value: formData.totalValue, 
+      is_qualified: true
     };
 
     try {

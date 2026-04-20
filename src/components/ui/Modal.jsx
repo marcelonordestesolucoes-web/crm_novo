@@ -77,4 +77,6 @@ export const Modal = ({
       )}
     </AnimatePresence>
   );
+
+  return createPortal(modalContent, document.body);
 };

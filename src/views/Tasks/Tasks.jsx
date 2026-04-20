@@ -6,7 +6,7 @@ import { Badge, Button, Card, PageHeader, LoadingSpinner, ErrorMessage, Modal } 
 import { TASK_PRIORITY, TASK_STATUS } from '@/constants/config';
 import { useSupabase } from '@/hooks/useSupabase';
 import { getTasks, toggleTaskStatus } from '@/services/tasks';
-import { trackAIInteraction } from '@/services/aiTracking';
+import { trackUserEvent } from '@/services/aiTracking';
 import { TaskForm } from './TaskForm';
 
 const TaskItem = ({ task, onToggle, onEdit }) => {
@@ -138,7 +138,7 @@ export default function Tasks() {
       await toggleTaskStatus(task.id, task.status);
       
       if (task.status !== 'completed' && task.dealId) {
-        trackAIInteraction(task.dealId, 'completed_task');
+        trackUserEvent(task.dealId, 'task_completed');
       }
 
       refetch();

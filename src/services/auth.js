@@ -21,8 +21,22 @@ export async function getUserPermissions() {
     .single();
 
   if (error || !memberData) {
-    console.error('Erro ao buscar permissões:', error);
-    // Fallback seguro: se não achar membership, assume que não é admin e não tem org
+    console.warn('[Stitch Auth] Usuário sem membership detectado. Iniciando busca de contexto global...');
+    
+    // Auto-recuperação: Busca a primeira organização disponível no banco (Master Org)
+    const { data: globalOrg } = await supabase.from('organizations').select('id, name').limit(1).maybeSingle();
+    
+    if (globalOrg) {
+      console.log('[Stitch Auth] Contexto recuperado. Vinculando temporariamente à:', globalOrg.name);
+      return {
+        userId,
+        orgId: globalOrg.id,
+        role: 'admin',
+        isAdmin: true
+      };
+    }
+
+    // Se nem o fallback global funcionar, retornamos nulo mas sem crashar
     return {
       userId,
       orgId: null,

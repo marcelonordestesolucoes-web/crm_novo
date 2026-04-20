@@ -16,7 +16,7 @@ export function AuthProvider({ children }) {
       setLoading(false);
     });
 
-    // Escuta mudanças de autenticação (login, logout)
+    // Escuta mudanças de autenticação (login, logout, password recovery)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
@@ -37,12 +37,33 @@ export function AuthProvider({ children }) {
     if (error) throw error;
   };
 
+  /**
+   * Envia email de recuperação de senha.
+   * redirectTo: URL para onde o usuário será enviado após clicar no link do email.
+   */
+  const resetPassword = async (email) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/update-password`,
+    });
+    if (error) throw error;
+  };
+
+  /**
+   * Atualiza a senha do usuário logado (usado após clicar no link de reset).
+   */
+  const updatePassword = async (newPassword) => {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+  };
+
   const value = {
     user,
     session,
     loading,
     login,
     logout,
+    resetPassword,
+    updatePassword
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

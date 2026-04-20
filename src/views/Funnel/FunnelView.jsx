@@ -266,7 +266,7 @@ export default function FunnelView() {
   const { query, setQuery, filtered } = useSearch(deals ?? [], ['title', 'company']);
 
   const dealsByStage = stages.reduce((acc, stage) => {
-    const stageDeals = filtered.filter((d) => d.stage === stage.id);
+    const stageDeals = filtered.filter((d) => d.stage === stage.id && d.is_qualified !== false);
     const totalValue = stageDeals.reduce((sum, d) => sum + (d.value || 0), 0);
     
     acc[stage.id] = {
@@ -443,7 +443,7 @@ export default function FunnelView() {
       {/* Modal de Criação/Edição */}
       <Modal
         isOpen={createModalOpen}
-        onClose={() => setCreateModalOpen(false)}
+        onClose={() => { setCreateModalOpen(false); setEditingDeal(null); }}
         title={editingDeal?.id ? 'Editar Oportunidade' : 'Novo Negócio'}
         className="max-w-4xl"
         footer={
@@ -465,9 +465,10 @@ export default function FunnelView() {
         }
       >
         <DealForm 
+          key={editingDeal?.id || 'new'}
           initialData={editingDeal} 
           onSuccess={handleCreateSuccess} 
-          onCancel={() => setCreateModalOpen(false)}
+          onCancel={() => { setCreateModalOpen(false); setEditingDeal(null); }}
         />
       </Modal>
 

@@ -27,6 +27,13 @@ export const calculateClosingScore = (deal, notes = []) => {
   if (daysSinceUpdate > 5) score -= 20;
   else if (daysSinceUpdate > 3) score -= 10;
 
+  // LAYER ELITE: WhatsApp Intelligence (Conversation Momentum)
+  if (deal.lastAIInsight?.deal_impact != null) {
+    const aiImpact = deal.lastAIInsight.deal_impact;
+    // Impacto de +/- 40% na probabilidade total
+    score += (aiImpact * 40);
+  }
+
   // Sentiment Analysis das notas
   notes.forEach(n => {
     const nt = n.toLowerCase();

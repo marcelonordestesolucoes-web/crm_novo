@@ -11,6 +11,7 @@ export const Card = ({
   hover = false,
   elevated = false,
   onClick,
+  beam = false, // Extraído das props
   ...props
 }) => {
   const variants = {
@@ -24,7 +25,6 @@ export const Card = ({
     none: '',
   };
 
-  const beam = props.beam;
 
   return (
     <div
