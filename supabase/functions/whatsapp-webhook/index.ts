@@ -53,6 +53,44 @@ function isGenericName(name?: string | null) {
   return ["Contato WhatsApp", "Lead WhatsApp", "Grupo WhatsApp"].includes(name);
 }
 
+function firstMeaningfulName(...names: Array<unknown>) {
+  for (const name of names) {
+    const value = String(name || "").trim();
+    if (value && !isGenericName(value)) return value;
+  }
+
+  return null;
+}
+
+async function fetchZapiContactName(identifiers: string[]) {
+  const instanceId = Deno.env.get("ZAPI_INSTANCE_ID");
+  const instanceToken = Deno.env.get("ZAPI_INSTANCE_TOKEN");
+  const clientToken = Deno.env.get("ZAPI_CLIENT_TOKEN");
+
+  if (!instanceId || !instanceToken) return null;
+
+  const headers: Record<string, string> = {};
+  if (clientToken) headers["Client-Token"] = clientToken;
+
+  for (const identifier of identifiers) {
+    if (!identifier) continue;
+
+    try {
+      const url = `https://api.z-api.io/instances/${instanceId}/token/${instanceToken}/contacts/${encodeURIComponent(identifier)}`;
+      const response = await fetch(url, { headers });
+      if (!response.ok) continue;
+
+      const data = await response.json().catch(() => null);
+      const name = firstMeaningfulName(data?.name, data?.notify, data?.short, data?.vname);
+      if (name) return name;
+    } catch (err) {
+      console.warn("ZAPI CONTACT LOOKUP FAILED:", identifier, err);
+    }
+  }
+
+  return null;
+}
+
 function getMediaInfo(body: Record<string, any>) {
   let type = body.type || body.data?.type || "text";
   let url = body.mediaUrl || body.data?.mediaUrl || null;
@@ -133,10 +171,19 @@ serve(async (req) => {
     const contactPhone = isGroup ? chatId : normalizeContactPhone(body);
     const contactIdentity = contactPhone || chatId;
     const groupName = body.chatName || body.data?.chatName;
-    const senderName = body.senderName || body.data?.senderName ||
+    const payloadName = firstMeaningfulName(
+      body.senderName,
+      body.data?.senderName,
       body.chatName || body.data?.chatName ||
       body.pushName || body.data?.pushName ||
-      body.notify || body.data?.notify;
+      body.notify || body.data?.notify,
+    );
+    const zapiContactName = isGroup ? null : await fetchZapiContactName([
+      contactPhone || "",
+      chatId,
+      contactIdentity,
+    ]);
+    const senderName = payloadName || zapiContactName;
     const finalDisplayName = isGroup
       ? (groupName || "Grupo WhatsApp")
       : (senderName || "Lead WhatsApp");
