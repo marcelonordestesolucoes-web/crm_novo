@@ -39,9 +39,12 @@ export async function getCompanies() {
 }
 
 export async function createCompany(company) {
+  const { userId, orgId } = await getUserPermissions();
+  if (!orgId) throw new Error('Usuário sem organização ativa.');
+
   const { data, error } = await supabase
     .from('companies')
-    .insert([company])
+    .insert([{ ...company, user_id: company.user_id || userId, org_id: company.org_id || orgId }])
     .select()
     .single();
 
@@ -50,10 +53,12 @@ export async function createCompany(company) {
 }
 
 export async function updateCompany(id, updates) {
+  const { orgId } = await getUserPermissions();
   const { data, error } = await supabase
     .from('companies')
     .update(updates)
     .eq('id', id)
+    .eq('org_id', orgId)
     .select()
     .single();
 
@@ -62,10 +67,12 @@ export async function updateCompany(id, updates) {
 }
 
 export async function deleteCompany(id) {
+  const { orgId } = await getUserPermissions();
   const { error } = await supabase
     .from('companies')
     .delete()
-    .eq('id', id);
+    .eq('id', id)
+    .eq('org_id', orgId);
 
   if (error) throw error;
 }

@@ -195,6 +195,7 @@ export async function createDeal(payload) {
     .limit(1);
   
   const orgId = memberData?.[0]?.org_id;
+  if (!orgId) throw new Error('Usuário sem organização ativa.');
 
   // 1. Inserir Empresa
   let companyId = null;
@@ -293,6 +294,7 @@ export async function updateDeal(id, payload) {
     .from('deals')
     .update(cleanPayload)
     .eq('id', id)
+    .eq('org_id', orgId)
     .select()
     .single();
 
@@ -317,7 +319,7 @@ export async function updateDeal(id, payload) {
       cnpj: payload.taxId,
       segment: payload.segment,
       name: payload.company || undefined // Só atualiza se o nome não for vazio
-    }).eq('id', updatedDeal.company_id);
+    }).eq('id', updatedDeal.company_id).eq('org_id', orgId);
   }
 
   // 3. Sincronização Global de Contatos
@@ -336,7 +338,7 @@ export async function updateDeal(id, payload) {
           role: contact.role,
           phone: contact.phone,
           email: contact.email
-        }).eq('id', contactId);
+        }).eq('id', contactId).eq('org_id', orgId);
       } else {
         // Novo contato: cria globalmente já vinculado à organização e empresa
         const { data: newContact, error: cErr } = await supabase.from('contacts').insert({
@@ -354,13 +356,26 @@ export async function updateDeal(id, payload) {
       if (contactId) finalContactIds.push(contactId);
     }
 
-    // 4. Sincronizar Vínculos (deal_contacts)
-    // Remove todos os vínculos atuais para reconstruir a lista atualizada
-    await supabase.from('deal_contacts').delete().eq('deal_id', id);
-    
-    // Insere os novos vínculos baseados na lista final de IDs (existentes + novos)
-    if (finalContactIds.length > 0) {
-      const links = finalContactIds.map(cid => ({
+    const { data: existingLinks } = await supabase
+      .from('deal_contacts')
+      .select('contact_id')
+      .eq('deal_id', id);
+
+    const existingContactIds = new Set((existingLinks || []).map(link => link.contact_id));
+    const nextContactIds = new Set(finalContactIds);
+    const linksToDelete = [...existingContactIds].filter(contactId => !nextContactIds.has(contactId));
+    const linksToInsert = [...nextContactIds].filter(contactId => !existingContactIds.has(contactId));
+
+    if (linksToDelete.length > 0) {
+      await supabase
+        .from('deal_contacts')
+        .delete()
+        .eq('deal_id', id)
+        .in('contact_id', linksToDelete);
+    }
+
+    if (linksToInsert.length > 0) {
+      const links = linksToInsert.map(cid => ({
         deal_id: id,
         contact_id: cid
       }));
@@ -382,6 +397,7 @@ export async function updateDeal(id, payload) {
  * Transfere um negócio para outro funil e estágio, com justificativa.
  */
 export async function transferDealToPipeline(dealId, pipelineId, stageId, justification) {
+  const { orgId } = await getUserPermissions();
   // 1. Atualizar o estágio do negócio (e pipeline_id se existir a coluna)
   const { data: updatedDeal, error: updateError } = await supabase
     .from('deals')
@@ -390,6 +406,7 @@ export async function transferDealToPipeline(dealId, pipelineId, stageId, justif
       // pipeline_id: pipelineId // Comentado por segurança até confirmar coluna
     })
     .eq('id', dealId)
+    .eq('org_id', orgId)
     .select()
     .single();
 
@@ -415,10 +432,12 @@ export async function transferDealToPipeline(dealId, pipelineId, stageId, justif
  * Move um negócio para outro estágio e registra na timeline.
  */
 export async function moveDealStage(id, newStage) {
+  const { orgId } = await getUserPermissions();
   const { data, error } = await supabase
     .from('deals')
     .update({ stage: newStage })
     .eq('id', id)
+    .eq('org_id', orgId)
     .select()
     .single();
 
@@ -442,10 +461,12 @@ export async function moveDealStage(id, newStage) {
  * Exclui um negócio.
  */
 export async function deleteDeal(id) {
+  const { orgId } = await getUserPermissions();
   const { error } = await supabase
     .from('deals')
     .delete()
-    .eq('id', id);
+    .eq('id', id)
+    .eq('org_id', orgId);
 
   if (error) throw error;
 }

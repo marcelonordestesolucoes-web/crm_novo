@@ -3,6 +3,7 @@
 
 import { supabase } from '@/lib/supabase';
 import { sendWhatsAppMessage, sendWhatsAppMedia } from './whatsappSender';
+import { getUserPermissions } from './auth';
 
 /**
  * Busca todas as conversas vinculadas a um negócio específico.
@@ -16,11 +17,13 @@ import { sendWhatsAppMessage, sendWhatsAppMedia } from './whatsappSender';
  */
 export async function getConversationsByContext({ dealId, phone, chatId }) {
   if (!dealId && !phone && !chatId) return [];
+  const { orgId } = await getUserPermissions();
+  if (!orgId) return [];
 
   // [ELITE NORMALIZATION] Garantir que o telefone esteja limpo para a busca
   const cleanPhone = phone ? String(phone).replace(/\D/g, '') : null;
 
-  let query = supabase.from('deal_conversations').select('*');
+  let query = supabase.from('deal_conversations').select('*').eq('org_id', orgId);
   
   // Construção da query OR agressiva (suporta ID de negócio, telefone ou o novo chat_id)
   const orConditions = [];
@@ -55,7 +58,16 @@ export async function getConversationsByDeal(dealId) {
  * @param {string} mediaUrl - (Opcional) URL pública do arquivo.
  * @param {string} messageType - (Opcional) 'text' | 'image' | 'audio'.
  */
-export async function createConversation(dealId, content, senderType = 'client', source = 'manual', phone = null, mediaUrl = null, messageType = 'text') {
+export async function createConversation(
+  dealId,
+  content,
+  senderType = 'client',
+  source = 'manual',
+  phone = null,
+  mediaUrl = null,
+  messageType = 'text',
+  options = {}
+) {
   if (!dealId && !phone) {
     throw new Error('dealId ou phone é obrigatório para salvar uma conversa.');
   }
@@ -63,25 +75,29 @@ export async function createConversation(dealId, content, senderType = 'client',
   // 0. BUSCAR ORG_ID (Se não fornecido)
   const { data: { user } } = await supabase.auth.getUser();
   const { data: membership } = await supabase.from('memberships').select('org_id').eq('user_id', user?.id).single();
+  if (!membership?.org_id) throw new Error('Usuário sem organização ativa.');
 
   // --- [ ELITE OUTBOUND TRIGGER ] ---
   // Se for WhatsApp e o remetente for vendedor, DISPARA O ZAP REAL
   let externalId = null;
-  let normalizedChatId = phone;
+  const normalizedChatId = options.chatId || phone;
+  const recipientPhone = options.recipientPhone || phone;
+  const senderPhone = options.senderPhone || recipientPhone || phone;
 
-  if (source === 'whatsapp' && senderType === 'sales' && phone) {
+  if (source === 'whatsapp' && senderType === 'sales' && recipientPhone) {
      // A âncora agora é o ID completo que já vem do Inbox (v22: Sem sufixos manuais)
      try {
-       console.log('[Stitch] Disparando envio real para:', normalizedChatId);
+       console.log('[Stitch] Disparando envio real para:', recipientPhone, '| chat_id:', normalizedChatId);
        let zapiResponse;
        
        if (mediaUrl) {
-         zapiResponse = await sendWhatsAppMedia(normalizedChatId, mediaUrl, messageType, content);
+         zapiResponse = await sendWhatsAppMedia(recipientPhone, mediaUrl, messageType, content);
        } else {
-         zapiResponse = await sendWhatsAppMessage(normalizedChatId, content);
+         zapiResponse = await sendWhatsAppMessage(recipientPhone, content);
        }
        
-       externalId = zapiResponse?.zaid || zapiResponse?.messageId;
+       console.log('[Stitch] Resposta Z-API:', zapiResponse);
+       externalId = zapiResponse?.zaapId || zapiResponse?.zaid || zapiResponse?.messageId || zapiResponse?.id;
      } catch (err) {
        console.error('[Stitch] Falha no disparo real. Cancelando persistência:', err);
        throw new Error('Falha ao enviar mensagem pelo WhatsApp. Verifique sua conexão/instância.');
@@ -96,7 +112,7 @@ export async function createConversation(dealId, content, senderType = 'client',
         content: content,
         sender_type: senderType,
         source: source,
-        sender_phone: phone, 
+        sender_phone: senderPhone,
         org_id: membership?.org_id,
         chat_id: normalizedChatId,
         external_message_id: externalId,
@@ -114,7 +130,7 @@ export async function createConversation(dealId, content, senderType = 'client',
   }
 
   // 1. REGISTRAR NA TIMELINE SE FOR MENSAGEM DO VENDEDOR (v7.0)
-  if (senderType === 'sales') {
+  if (senderType === 'sales' && dealId) {
     await supabase.from('deal_timeline').insert([{
       deal_id: dealId,
       type: 'whatsapp_interaction',

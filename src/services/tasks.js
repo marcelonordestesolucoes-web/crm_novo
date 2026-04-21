@@ -64,6 +64,7 @@ export async function createTask(payload) {
     .eq('user_id', userId)
     .limit(1);
   const orgId = memberData?.[0]?.org_id;
+  if (!orgId) throw new Error('Usuário sem organização ativa.');
 
   const { data, error } = await supabase
     .from('tasks')
@@ -92,6 +93,7 @@ export async function createTask(payload) {
 }
 
 export async function updateTask(id, payload) {
+  const { orgId } = await getUserPermissions();
   const { data, error } = await supabase
     .from('tasks')
     .update({
@@ -103,6 +105,7 @@ export async function updateTask(id, payload) {
       deal_id:  payload.dealId
     })
     .eq('id', id)
+    .eq('org_id', orgId)
     .select()
     .single();
 
@@ -116,11 +119,13 @@ export async function updateTask(id, payload) {
 }
 
 export async function toggleTaskStatus(id, currentStatus) {
+  const { orgId } = await getUserPermissions();
   const newStatus = currentStatus === 'completed' ? 'pending' : 'completed';
   const { data, error } = await supabase
     .from('tasks')
     .update({ status: newStatus })
     .eq('id', id)
+    .eq('org_id', orgId)
     .select()
     .single();
 
@@ -186,10 +191,12 @@ export async function checkTaskExists(title, dealId) {
 }
 
 export async function deleteTask(id) {
+  const { orgId } = await getUserPermissions();
   const { error } = await supabase
     .from('tasks')
     .delete()
-    .eq('id', id);
+    .eq('id', id)
+    .eq('org_id', orgId);
 
   if (error) throw error;
 }

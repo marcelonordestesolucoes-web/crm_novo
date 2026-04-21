@@ -15,7 +15,9 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
     const openAiKey = Deno.env.get('OPENAI_API_KEY')
-    const supabase = createClient(supabaseUrl, supabaseAnonKey)
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } },
+    })
 
     const { deal_id, conversation_id, global = false } = await req.json()
     console.log(`[Oracle] Início da análise para Deal: ${deal_id} | Global: ${global}`);

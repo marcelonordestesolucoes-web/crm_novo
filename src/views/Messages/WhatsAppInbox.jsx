@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { useSupabase } from '@/hooks/useSupabase';
 import { getWhatsAppInbox, deleteChat } from '@/services/whatsapp';
 import { getConversationsByContext, createConversation } from '@/services/conversations';
+import { getUserPermissions } from '@/services/auth';
 import { supabase } from '@/lib/supabase';
 import { LoadingSpinner, GlassCard, Modal, Badge } from '@/components/ui';
 import { DealForm } from '@/views/Funnel/DealForm';
@@ -54,7 +55,9 @@ export default function WhatsAppInbox() {
   const activeChatId = activeChat?.id; // Usar a chave única reconstruída (c-ID ou p-Phone)
   const activeDealId = activeChat?.deal_id;
   const activeChatPhone = activeChat?.contact_phone;
-  const activeContactId = activeChat?.contact_id;
+  const activeRecipientId = activeChatId?.includes('@lid') || activeChatId?.includes('@g.us')
+    ? activeChatId
+    : (activeChatPhone || activeChatId);
 
   // [ELITE PERFORMANCE] Sincronizar o chat ativo sem loops de re-renderização
   useEffect(() => {
@@ -72,6 +75,35 @@ export default function WhatsAppInbox() {
   );
 
   const isAutoCreated = activeChat?.is_qualified === false;
+  const displayedMessages = React.useMemo(() => {
+    const unique = [];
+
+    messages.forEach((message) => {
+      const existingIndex = unique.findIndex((item) => {
+        if (item.id === message.id) return true;
+        if (item.chat_id !== message.chat_id) return false;
+        if (item.sender_type !== message.sender_type) return false;
+        if (item.content !== message.content) return false;
+
+        const itemTime = new Date(item.created_at).getTime();
+        const messageTime = new Date(message.created_at).getTime();
+        return Number.isFinite(itemTime) &&
+          Number.isFinite(messageTime) &&
+          Math.abs(itemTime - messageTime) < 10000;
+      });
+
+      if (existingIndex === -1) {
+        unique.push(message);
+        return;
+      }
+
+      if (unique[existingIndex].is_optimistic && !message.is_optimistic) {
+        unique[existingIndex] = message;
+      }
+    });
+
+    return unique;
+  }, [messages]);
 
   // 1. Ouvir mudanças globais para atualizar a lista do Inbox
   useEffect(() => {
@@ -176,6 +208,7 @@ export default function WhatsAppInbox() {
       id: tempId,
       deal_id: activeDealId,
       sender_phone: activeChatPhone,
+      chat_id: activeChatId,
       content: content,
       sender_type: 'sales',
       source: 'whatsapp',
@@ -188,7 +221,12 @@ export default function WhatsAppInbox() {
     try {
       setIsSending(true);
       // v22: Enviamos o Id completo (JID) para evitar duplicidade
-      await createConversation(activeDealId, content, 'sales', 'whatsapp', activeChatId);
+      const savedMessage = await createConversation(activeDealId, content, 'sales', 'whatsapp', activeRecipientId, null, 'text', {
+        chatId: activeChatId,
+        recipientPhone: activeRecipientId,
+        senderPhone: activeRecipientId
+      });
+      setMessages(prev => prev.map(m => m.id === tempId ? savedMessage : m));
     } catch (err) {
       setMessages(prev => prev.filter(m => m.id !== tempId));
       setNewMessage(content);
@@ -264,7 +302,11 @@ export default function WhatsAppInbox() {
         .from('whatsapp_media')
         .getPublicUrl(filePath);
 
-      await createConversation(activeDealId, 'Mensagem de voz', 'sales', 'whatsapp', activeChatId, publicUrl, 'audio');
+      await createConversation(activeDealId, 'Mensagem de voz', 'sales', 'whatsapp', activeRecipientId, publicUrl, 'audio', {
+        chatId: activeChatId,
+        recipientPhone: activeRecipientId,
+        senderPhone: activeRecipientId
+      });
     } catch (err) {
       console.error('Erro ao enviar áudio:', err);
       alert('Falha ao enviar áudio.');
@@ -308,7 +350,11 @@ export default function WhatsAppInbox() {
       else if (file.type.startsWith('video/')) type = 'video';
 
       // 4. Salvar e Disparar
-      await createConversation(activeDealId, `Arquivo: ${file.name}`, 'sales', 'whatsapp', activeChatId, publicUrl, type);
+      await createConversation(activeDealId, `Arquivo: ${file.name}`, 'sales', 'whatsapp', activeRecipientId, publicUrl, type, {
+        chatId: activeChatId,
+        recipientPhone: activeRecipientId,
+        senderPhone: activeRecipientId
+      });
       
     } catch (err) {
       console.error('Erro no upload/envio:', err);
@@ -387,8 +433,8 @@ export default function WhatsAppInbox() {
           targetCompanyId = existingCompany.id;
         } else {
           // Criar nova empresa placeholder
-          const { data: orgs } = await supabase.from('organizations').select('id').limit(1);
-          const orgId = orgs?.[0]?.id || 'bf18a14a-c234-490f-a48b-7b8579eeff9e';
+          const { orgId } = await getUserPermissions();
+          if (!orgId) throw new Error('Usuário sem organização ativa.');
           
           const { data: newCompany, error: compError } = await supabase.from('companies').insert({
             name: companyName,
@@ -403,8 +449,8 @@ export default function WhatsAppInbox() {
           }
         }
 
-        const { data: orgs } = await supabase.from('organizations').select('id').limit(1);
-        const orgId = orgs?.[0]?.id || 'bf18a14a-c234-490f-a48b-7b8579eeff9e';
+        const { orgId } = await getUserPermissions();
+        if (!orgId) throw new Error('Usuário sem organização ativa.');
 
         const { data: newDeal, error: dealError } = await supabase.from('deals').insert({
           title: `Oportunidade Oracle: ${activeChat.contact_name}`,
@@ -631,7 +677,7 @@ export default function WhatsAppInbox() {
             {/* Header do Chat */}
             <div className="p-6 border-b border-slate-200 bg-white/60 backdrop-blur-md flex justify-between items-center z-10 box-decoration-clone">
               <div className="flex items-center gap-4">
-                <button onClick={() => setActiveDealId(null)} className="md:hidden p-2 text-slate-400"><ArrowLeft /></button>
+                <button onClick={() => setActiveChat(null)} className="md:hidden p-2 text-slate-400"><ArrowLeft /></button>
                 <div className="w-12 h-12 rounded-full bg-slate-200 flex items-center justify-center font-bold text-slate-500 shadow-sm overflow-hidden">
                    {activeChat.contact_name?.[0]}
                 </div>
@@ -835,7 +881,7 @@ export default function WhatsAppInbox() {
                 </div>
               ) : null}
 
-              {messages.map((msg) => {
+              {displayedMessages.map((msg) => {
                 const isMe = msg.sender_type === 'sales';
                 const hasAI = msg.metadata?.ai_analysis;
 

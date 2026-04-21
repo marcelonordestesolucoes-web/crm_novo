@@ -40,9 +40,12 @@ export async function getContacts() {
 }
 
 export async function createContact(contact) {
+  const { userId, orgId } = await getUserPermissions();
+  if (!orgId) throw new Error('Usuário sem organização ativa.');
+
   const { data, error } = await supabase
     .from('contacts')
-    .insert([contact])
+    .insert([{ ...contact, user_id: contact.user_id || userId, org_id: contact.org_id || orgId }])
     .select()
     .single();
 
@@ -51,10 +54,12 @@ export async function createContact(contact) {
 }
 
 export async function updateContact(id, updates) {
+  const { orgId } = await getUserPermissions();
   const { data, error } = await supabase
     .from('contacts')
     .update(updates)
     .eq('id', id)
+    .eq('org_id', orgId)
     .select()
     .single();
 
@@ -63,10 +68,12 @@ export async function updateContact(id, updates) {
 }
 
 export async function deleteContact(id) {
+  const { orgId } = await getUserPermissions();
   const { error } = await supabase
     .from('contacts')
     .delete()
-    .eq('id', id);
+    .eq('id', id)
+    .eq('org_id', orgId);
 
   if (error) throw error;
 }

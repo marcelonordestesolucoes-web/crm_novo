@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle2, Circle, Sparkles, Database, Shield, Zap, ArrowRight, BookOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
+import { getUserPermissions } from '@/services/auth';
 
 export const AIOnboardingRoadmap = () => {
     const [steps, setSteps] = React.useState([
@@ -16,8 +17,11 @@ export const AIOnboardingRoadmap = () => {
     // [STITCH PERSISTENCE] Detectar se a IA já foi ativa no passado via DB Metadata ou Local
     React.useEffect(() => {
         const checkStatus = async () => {
-            const { data: orgs } = await supabase.from('organizations').select('ai_used').limit(1);
-            const alreadyActive = orgs?.[0]?.ai_used > 0 || localStorage.getItem('stitch_ai_active') === 'true';
+            const { orgId } = await getUserPermissions();
+            const { data: org } = orgId
+                ? await supabase.from('organizations').select('ai_used').eq('id', orgId).maybeSingle()
+                : { data: null };
+            const alreadyActive = org?.ai_used > 0 || localStorage.getItem('stitch_ai_active') === 'true';
             
             if (alreadyActive) {
                 setSteps(prev => prev.map(s => 
@@ -37,8 +41,7 @@ export const AIOnboardingRoadmap = () => {
         if (!user) return;
 
         // 1. Garantir Organização e Membership (Auto-Setup)
-        const { data: orgs } = await supabase.from('organizations').select('id').limit(1);
-        let orgId = orgs?.[0]?.id;
+        let { orgId } = await getUserPermissions();
 
         if (!orgId) {
           const { data: newOrg } = await supabase.from('organizations').insert({
