@@ -45,9 +45,11 @@ export async function getWhatsAppInbox() {
 
   return Array.from(inboxMap.values()).map((msg) => {
     const contact = msg.contact || msg.deals?.contacts?.[0]?.contact;
+    const contactName = contact?.name;
+    const isGenericContact = !contactName || ['Contato WhatsApp', 'Lead WhatsApp', 'Grupo WhatsApp'].includes(contactName);
     const displayName = msg.is_group
-      ? (contact?.name || 'Grupo WhatsApp')
-      : (contact?.name || msg.sender_name || 'Contato WhatsApp');
+      ? (isGenericContact ? (msg.sender_name || contactName || 'Grupo WhatsApp') : contactName)
+      : (isGenericContact ? (msg.sender_name || contactName || 'Contato WhatsApp') : contactName);
 
     return {
       id: msg.chat_id,

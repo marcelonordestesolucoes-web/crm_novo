@@ -21,6 +21,36 @@ function normalizeChatId(body: Record<string, any>) {
   return chatId;
 }
 
+function normalizeContactPhone(body: Record<string, any>) {
+  const candidates = [
+    body.senderPhone,
+    body.participantPhone,
+    body.phone,
+    body.from,
+    body.data?.senderPhone,
+    body.data?.participantPhone,
+    body.data?.phone,
+    body.data?.from,
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+
+    const raw = String(candidate).trim();
+    if (raw.includes("@lid") || raw.includes("@g.us")) continue;
+
+    const digits = raw.split("@")[0].replace(/\D/g, "");
+    if (digits.length >= 10 && digits.length <= 15) return digits;
+  }
+
+  return null;
+}
+
+function isGenericName(name?: string | null) {
+  if (!name) return true;
+  return ["Contato WhatsApp", "Lead WhatsApp", "Grupo WhatsApp"].includes(name);
+}
+
 function getMediaInfo(body: Record<string, any>) {
   let type = body.type || body.data?.type || "text";
   let url = body.mediaUrl || body.data?.mediaUrl || null;
@@ -98,34 +128,63 @@ serve(async (req) => {
     if (!chatId) return new Response("No ID", { headers: corsHeaders });
 
     const isGroup = chatId.includes("@g.us");
-    const contactPhone = isGroup ? chatId : chatId.replace(/\D/g, "");
+    const contactPhone = isGroup ? chatId : normalizeContactPhone(body);
+    const contactIdentity = contactPhone || chatId;
     const groupName = body.chatName || body.data?.chatName;
     const senderName = body.senderName || body.data?.senderName || body.pushName;
     const finalDisplayName = isGroup
       ? (groupName || "Grupo WhatsApp")
       : (senderName || "Lead WhatsApp");
 
-    let { data: contact } = await supabase
-      .from("contacts")
-      .select("id, name")
-      .eq("phone", contactPhone)
+    const { data: existingThread } = await supabase
+      .from("deal_conversations")
+      .select("contact_id, contact:contacts(id, name, phone)")
       .eq("org_id", org.id)
+      .eq("chat_id", chatId)
+      .not("contact_id", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
       .maybeSingle();
+
+    let contact = existingThread?.contact || null;
+
+    if (!contact && contactPhone) {
+      const { data: contactByPhone } = await supabase
+        .from("contacts")
+        .select("id, name, phone")
+        .eq("phone", contactPhone)
+        .eq("org_id", org.id)
+        .maybeSingle();
+
+      contact = contactByPhone;
+    }
+
+    if (!contact) {
+      const { data: contactByIdentity } = await supabase
+        .from("contacts")
+        .select("id, name, phone")
+        .eq("phone", contactIdentity)
+        .eq("org_id", org.id)
+        .maybeSingle();
+
+      contact = contactByIdentity;
+    }
 
     if (!contact) {
       const { data: createdContact } = await supabase
         .from("contacts")
         .insert({
           name: finalDisplayName,
-          phone: contactPhone,
+          phone: contactIdentity,
           org_id: org.id,
           is_auto_created: true,
         })
-        .select("id, name")
+        .select("id, name, phone")
         .single();
       contact = createdContact;
-    } else if (isGroup && groupName && contact.name !== groupName) {
-      await supabase.from("contacts").update({ name: groupName }).eq("id", contact.id);
+    } else if (finalDisplayName && (isGenericName(contact.name) || (isGroup && groupName && contact.name !== groupName))) {
+      await supabase.from("contacts").update({ name: finalDisplayName }).eq("id", contact.id);
+      contact = { ...contact, name: finalDisplayName };
     }
 
     const media = getMediaInfo(body);
@@ -161,7 +220,7 @@ serve(async (req) => {
       org_id: org.id,
       chat_id: chatId,
       contact_id: contact?.id,
-      sender_phone: contactPhone,
+      sender_phone: contact?.phone || contactIdentity,
       content,
       sender_type: sentByMe ? "sales" : "client",
       source: "whatsapp",
