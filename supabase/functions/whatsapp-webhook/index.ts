@@ -7,8 +7,10 @@ const corsHeaders = {
 };
 
 function normalizeChatId(body: Record<string, any>) {
-  const rawId = body.chatLid || body.chatId || body.phone || body.from ||
-    body.data?.chatLid || body.data?.chatId || body.data?.phone;
+  const rawId = body.chatLid || body.senderLid || body.participantLid ||
+    body.chatId || body.phone || body.from ||
+    body.data?.chatLid || body.data?.senderLid || body.data?.participantLid ||
+    body.data?.chatId || body.data?.phone;
 
   if (!rawId) return null;
 
@@ -131,7 +133,10 @@ serve(async (req) => {
     const contactPhone = isGroup ? chatId : normalizeContactPhone(body);
     const contactIdentity = contactPhone || chatId;
     const groupName = body.chatName || body.data?.chatName;
-    const senderName = body.senderName || body.data?.senderName || body.pushName;
+    const senderName = body.senderName || body.data?.senderName ||
+      body.chatName || body.data?.chatName ||
+      body.pushName || body.data?.pushName ||
+      body.notify || body.data?.notify;
     const finalDisplayName = isGroup
       ? (groupName || "Grupo WhatsApp")
       : (senderName || "Lead WhatsApp");
