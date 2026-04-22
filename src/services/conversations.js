@@ -28,9 +28,19 @@ export async function getConversationsByContext({ dealId, phone, chatId, contact
   let query = supabase.from('deal_conversations').select('*').eq('org_id', orgId);
   
   // Construção da query OR agressiva (suporta ID de negócio, telefone ou o novo chat_id)
+  const hasThreadIdentity = Boolean(
+    chatId ||
+    cleanPhone ||
+    phone ||
+    aliases.some(alias => {
+      const type = String(alias).split(':')[0];
+      return type === 'chat' || type === 'phone';
+    })
+  );
+
   const orConditions = [];
-  if (dealId) orConditions.push(`deal_id.eq.${dealId}`);
-  if (contactId) orConditions.push(`contact_id.eq.${contactId}`);
+  if (dealId && !hasThreadIdentity) orConditions.push(`deal_id.eq.${dealId}`);
+  if (contactId && !hasThreadIdentity) orConditions.push(`contact_id.eq.${contactId}`);
   if (cleanPhone) orConditions.push(`sender_phone.eq.${cleanPhone}`);
   if (phone) orConditions.push(`sender_phone.eq.${phone}`);
   if (chatId) orConditions.push(`chat_id.eq.${chatId}`);
@@ -40,7 +50,7 @@ export async function getConversationsByContext({ dealId, phone, chatId, contact
     const value = valueParts.join(':');
     if (!value) return;
 
-    if (type === 'contact') orConditions.push(`contact_id.eq.${value}`);
+    if (type === 'contact' && !hasThreadIdentity) orConditions.push(`contact_id.eq.${value}`);
     if (type === 'phone') orConditions.push(`sender_phone.eq.${value}`);
     if (type === 'chat') orConditions.push(`chat_id.eq.${value}`);
   });

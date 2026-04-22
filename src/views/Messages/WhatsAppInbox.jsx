@@ -78,7 +78,6 @@ export default function WhatsAppInbox() {
   const activeChatId = activeChat?.id; // Usar a chave única reconstruída (c-ID ou p-Phone)
   const activeDealId = activeChat?.deal_id;
   const activeChatPhone = activeChat?.contact_phone;
-  const activeContactId = activeChat?.contact_id;
   const activeThreadAliases = React.useMemo(() => activeChat?.thread_aliases || [], [activeChat?.thread_aliases]);
   const activeRecipientId = activeChatId?.includes('@lid') || activeChatId?.includes('@g.us')
     ? activeChatId
@@ -234,6 +233,27 @@ export default function WhatsAppInbox() {
     return unique;
   }, [messages]);
 
+  const messageBelongsToActiveThread = React.useCallback((message) => {
+    if (!message) return false;
+
+    const messageChatId = String(message.chat_id || '');
+    const messagePhone = message.sender_phone;
+
+    if (activeChatId && messageChatId && messageChatId === activeChatId) return true;
+    if (activeChatPhone && messagePhone && phonesMatch(messagePhone, activeChatPhone)) return true;
+
+    return activeThreadAliases.some((alias) => {
+      const [type, ...valueParts] = String(alias).split(':');
+      const value = valueParts.join(':');
+      if (!value) return false;
+
+      if (type === 'chat') return Boolean(messageChatId) && messageChatId === value;
+      if (type === 'phone') return Boolean(messagePhone) && phonesMatch(messagePhone, value);
+
+      return false;
+    });
+  }, [activeChatId, activeChatPhone, activeThreadAliases]);
+
   // 1. Ouvir mudanças globais para atualizar a lista do Inbox
   useEffect(() => {
     const channel = supabase
@@ -279,7 +299,6 @@ export default function WhatsAppInbox() {
         dealId: activeDealId,
         phone: activeChatPhone,
         chatId: activeChatId,
-        contactId: activeContactId,
         aliases: activeThreadAliases
       });
       
@@ -292,13 +311,7 @@ export default function WhatsAppInbox() {
         }, (payload) => {
           if (payload.new) {
             const newMsg = payload.new;
-            const belongsToActiveThread =
-              newMsg.chat_id === activeChatId ||
-              newMsg.contact_id === activeContactId ||
-              activeThreadAliases.includes(`chat:${newMsg.chat_id}`) ||
-              activeThreadAliases.includes(`phone:${newMsg.sender_phone}`);
-
-            if (!belongsToActiveThread) return;
+            if (!messageBelongsToActiveThread(newMsg)) return;
 
             setMessages(prev => {
                // Evitar duplicidade com optimistic records
@@ -318,7 +331,7 @@ export default function WhatsAppInbox() {
     } else {
       setMessages([]); // Limpar se nada estiver selecionado
     }
-  }, [activeDealId, activeChatPhone, activeChatId, activeContactId, activeThreadAliases]);
+  }, [activeDealId, activeChatPhone, activeChatId, activeThreadAliases, messageBelongsToActiveThread]);
 
   async function loadMessages(context) {
     try {
