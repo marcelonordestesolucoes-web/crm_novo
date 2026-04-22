@@ -15,24 +15,37 @@ import { getUserPermissions } from './auth';
  * @param {Object} context - { dealId, phone }
  * @returns {Promise<Array>} - Lista de conversas ordenada pela mais recente.
  */
-export async function getConversationsByContext({ dealId, phone, chatId }) {
-  if (!dealId && !phone && !chatId) return [];
+export async function getConversationsByContext({ dealId, phone, chatId, contactId, aliases = [] }) {
+  if (!dealId && !phone && !chatId && !contactId && !aliases.length) return [];
   const { orgId } = await getUserPermissions();
   if (!orgId) return [];
 
   // [ELITE NORMALIZATION] Garantir que o telefone esteja limpo para a busca
-  const cleanPhone = phone ? String(phone).replace(/\D/g, '') : null;
+  const cleanPhone = phone && !String(phone).includes('@lid') && !String(phone).includes('@g.us')
+    ? String(phone).replace(/\D/g, '')
+    : null;
 
   let query = supabase.from('deal_conversations').select('*').eq('org_id', orgId);
   
   // Construção da query OR agressiva (suporta ID de negócio, telefone ou o novo chat_id)
   const orConditions = [];
   if (dealId) orConditions.push(`deal_id.eq.${dealId}`);
+  if (contactId) orConditions.push(`contact_id.eq.${contactId}`);
   if (cleanPhone) orConditions.push(`sender_phone.eq.${cleanPhone}`);
   if (phone) orConditions.push(`sender_phone.eq.${phone}`);
   if (chatId) orConditions.push(`chat_id.eq.${chatId}`);
 
-  query = query.or(orConditions.join(','));
+  aliases.forEach((alias) => {
+    const [type, ...valueParts] = String(alias).split(':');
+    const value = valueParts.join(':');
+    if (!value) return;
+
+    if (type === 'contact') orConditions.push(`contact_id.eq.${value}`);
+    if (type === 'phone') orConditions.push(`sender_phone.eq.${value}`);
+    if (type === 'chat') orConditions.push(`chat_id.eq.${value}`);
+  });
+
+  query = query.or([...new Set(orConditions)].join(','));
 
   const { data, error } = await query.order('created_at', { ascending: true });
 

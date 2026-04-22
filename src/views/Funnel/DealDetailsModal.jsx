@@ -171,6 +171,11 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
   }, [isOpen, deal]); // Observar o objeto deal inteiro para detectar mudanças do refetch pai
 
   const handleSave = async (customData, options = { silent: false }) => {
+    if (customData?.preventDefault) {
+      customData.preventDefault();
+      customData = null;
+    }
+
     if (!options.silent) setIsSaving(true);
     try {
       const dataToSave = customData || {
@@ -179,13 +184,25 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
         value: editData.value,
         qualification: editData.qualification
       };
-      await updateDeal(deal.id, dataToSave);
+      const savedDeal = await updateDeal(deal.id, dataToSave);
+      setCurrentDeal(prev => ({ ...prev, ...savedDeal, qualification: dataToSave.qualification || {} }));
+      setEditData(prev => ({ ...prev, qualification: dataToSave.qualification || {} }));
       if (onUpdate) onUpdate();
     } catch (err) {
       console.error('Save Error:', err);
     } finally {
       if (!options.silent) setIsSaving(false);
     }
+  };
+
+  const handleQualificationChange = (responses) => {
+    setEditData(prev => ({ ...prev, qualification: responses }));
+    handleSave({
+      ...deal,
+      title: editData.title,
+      value: editData.value,
+      qualification: responses
+    }, { silent: true });
   };
 
   // Autosave Elite para Qualificação (Silencioso)
@@ -204,13 +221,40 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
 
   if (!isOpen || !deal) return null;
 
+  const safeDeal = currentDeal || deal;
   const activeStages = (stages && stages.length > 0) ? stages : PIPELINE_STAGES;
-  const currentStageIndex = activeStages.findIndex(s => s.id.toLowerCase() === (deal.stage || '').toLowerCase());
+  const currentStageIndex = activeStages.findIndex(s => s.id.toLowerCase() === (safeDeal.stage || '').toLowerCase());
   // Se não encontrar o estágio (index -1), assume que estamos no início (e o próximo é o index 1)
   const safeIndex = currentStageIndex === -1 ? 0 : currentStageIndex;
   const nextStage = activeStages[safeIndex + 1];
-  const isWon = (deal.stage || '').toLowerCase() === 'won' || (deal.stage || '').toLowerCase() === 'closed_won';
-  const isLost = (deal.stage || '').toLowerCase() === 'lost' || (deal.stage || '').toLowerCase() === 'closed_lost';
+  const normalizeStageText = (value = '') =>
+    String(value)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+
+  const findOutcomeStage = (outcome) => {
+    return activeStages.find(stage => {
+      const stageText = normalizeStageText(`${stage.label || ''} ${stage.name || ''} ${stage.id || ''}`);
+
+      if (outcome === 'won') {
+        return (
+          (stageText.includes('fechado') || stageText.includes('ganho') || stageText.includes('won') || stageText.includes('closed')) &&
+          !stageText.includes('perd') &&
+          !stageText.includes('lost')
+        );
+      }
+
+      return stageText.includes('perdi') || stageText.includes('perdido') || stageText.includes('lost');
+    });
+  };
+
+  const wonStage = findOutcomeStage('won');
+  const lostStage = findOutcomeStage('lost');
+  const currentStage = activeStages.find(s => s.id.toLowerCase() === (safeDeal.stage || '').toLowerCase());
+  const currentStageText = normalizeStageText(`${currentStage?.label || ''} ${safeDeal.stage || ''}`);
+  const isWon = safeDeal.stage === wonStage?.id || currentStageText.includes('ganho') || currentStageText.includes('fechado');
+  const isLost = safeDeal.stage === lostStage?.id || currentStageText.includes('perdi') || currentStageText.includes('perdido');
 
   const handleAdvance = async () => {
     if (!nextStage) return;
@@ -225,10 +269,15 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
 
   const handleMarkWon = async () => {
     try {
-      await updateDeal(deal.id, { ...deal, status: 'won' });
-      if (onUpdate) onUpdate();
+      if (!wonStage?.id) {
+        throw new Error('Etapa de ganho/fechado nao encontrada no funil ativo.');
+      }
+
+      const updatedDeal = await updateDeal(deal.id, { status: 'won', stage: wonStage.id });
+      setCurrentDeal(prev => ({ ...(prev || deal), ...updatedDeal, status: 'won', stage: wonStage.id }));
+      if (onUpdate) await onUpdate();
       refetchTimeline();
-      alert('Parabéns! Negócio marcado como GANHO! 🎉');
+      alert('Negocio marcado como ganho e movido para Fechado.');
     } catch (err) {
       alert('Erro ao marcar como ganho: ' + err.message);
     }
@@ -237,8 +286,13 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
   const handleMarkLost = async () => {
     if (!confirm('Deseja marcar este negócio como PERDIDO?')) return;
     try {
-      await updateDeal(deal.id, { ...deal, status: 'lost' });
-      if (onUpdate) onUpdate();
+      if (!lostStage?.id) {
+        throw new Error('Etapa de perdido nao encontrada no funil ativo.');
+      }
+
+      const updatedDeal = await updateDeal(deal.id, { status: 'lost', stage: lostStage.id });
+      setCurrentDeal(prev => ({ ...(prev || deal), ...updatedDeal, status: 'lost', stage: lostStage.id }));
+      if (onUpdate) await onUpdate();
       refetchTimeline();
     } catch (err) {
       alert('Erro ao marcar como perdido: ' + err.message);
@@ -458,6 +512,7 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
     }
   };
 
+
   const handleApplySuggestion = (suggestion) => {
     if (!suggestion) return;
     setNewConversationText(suggestion);
@@ -512,7 +567,7 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
                       className="text-3xl font-manrope font-black text-on-surface tracking-tight bg-transparent border-0 p-0 focus:ring-0 w-full hover:bg-black/5 rounded-lg transition-colors"
                     />
                     <Badge 
-                      label={activeStages.find(s => s.id.toLowerCase() === (currentDeal.stage || '').toLowerCase())?.label || currentDeal.stage} 
+                      label={activeStages.find(s => s.id.toLowerCase() === (safeDeal.stage || '').toLowerCase())?.label || safeDeal.stage} 
                       className={cn("px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border border-white/40", isWon ? 'bg-emerald-100 text-emerald-700' : isLost ? 'bg-red-100 text-red-700' : 'bg-primary-fixed text-on-primary-fixed')}
                     />
                   </div>
@@ -524,7 +579,7 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
               <div className="flex gap-2 shrink-0 items-center justify-end flex-wrap max-w-[60%]">
                 {hasChanges && (
                   <button 
-                    onClick={handleSave} 
+                    onClick={() => handleSave()} 
                     disabled={isSaving}
                     className="px-4 py-2 rounded-full bg-emerald-500 text-white font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-200 hover:shadow-xl active:scale-95 transition-all flex items-center gap-2"
                   >
@@ -581,10 +636,10 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Score do Deal</span>
                          <div className="flex items-center gap-2">
                             <span className="text-3xl font-manrope font-black text-on-surface">
-                               {currentDeal.ai_closing_probability || 0}%
+                               {safeDeal.ai_closing_probability || 0}%
                             </span>
                             {(() => {
-                               const delta = currentDeal.ai_probability_delta || 0;
+                               const delta = safeDeal.ai_probability_delta || 0;
                                const isPos = delta > 0;
                                const isNeg = delta < 0;
                                return (
@@ -607,7 +662,7 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
                       <div className="flex flex-col">
                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Temperatura</span>
                          {(() => {
-                            const temp = (currentDeal.ai_temperature || 'cool').toLowerCase();
+                            const temp = (safeDeal.ai_temperature || 'cool').toLowerCase();
                             const configs = {
                                hot: { label: 'Alta probabilidade', color: 'bg-emerald-500 text-white', icon: '🔥' },
                                warm: { label: 'Em evolução', color: 'bg-blue-500 text-white', icon: '☀️' },
@@ -630,11 +685,11 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
                       <div className="text-right">
                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Última Análise</p>
                          <p className="text-[10px] font-bold text-slate-500">
-                            {currentDeal.ai_last_analysis_at ? formatDate(currentDeal.ai_last_analysis_at) : 'Pendente'}
-                         </p>
-                      </div>
-                   </div>
-                </div>
+                            {safeDeal.ai_last_analysis_at ? formatDate(safeDeal.ai_last_analysis_at) : 'Pendente'}
+                          </p>
+                       </div>
+                    </div>
+                 </div>
 
                 {/* Tabs Navigation - STICKY FIX */}
                 <div className="flex gap-10 border-b border-white/10 px-12 sticky top-0 bg-white/60 backdrop-blur-2xl z-10 pt-4">
@@ -691,7 +746,7 @@ export const DealDetailsModal = ({ isOpen, onClose, deal, onUpdate, stages }) =>
 
                       <DealQualificationChecklist 
                         responses={editData.qualification}
-                        onChange={responses => setEditData({...editData, qualification: responses})}
+                        onChange={handleQualificationChange}
                       />
                     </div>
                   )}

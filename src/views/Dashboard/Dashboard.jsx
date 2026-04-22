@@ -10,6 +10,7 @@ import { OracleInsight } from '@/components/intelligence/OracleInsight';
 import { DealDetailsModal } from '@/views/Funnel/DealDetailsModal';
 import { useSupabase } from '@/hooks/useSupabase';
 import { getDeals } from '@/services/deals';
+import { getPipelines, getPipelineStages } from '@/services/pipelines';
 import { getOrgGoal, getMyMemberGoal } from '@/services/goals';
 import { getUserPermissions } from '@/services/auth';
 import { calculateClosingScore } from '@/utils/intelligence';
@@ -25,6 +26,28 @@ export default function Dashboard() {
   console.log('[DEBUG DASHBOARD] Deals:', deals?.length, 'Meta:', targetGoal);
   const [latestNotes, setLatestNotes] = React.useState({});
   const [planModalOpen, setPlanModalOpen] = React.useState(false);
+  const [pipelineStages, setPipelineStages] = React.useState([]);
+
+  React.useEffect(() => {
+    const fetchPipelineStages = async () => {
+      try {
+        const pipelines = await getPipelines();
+        const defaultPipeline = pipelines?.[0];
+        if (!defaultPipeline?.id) {
+          setPipelineStages([]);
+          return;
+        }
+
+        const stages = await getPipelineStages(defaultPipeline.id);
+        setPipelineStages(stages || []);
+      } catch (error) {
+        console.error('Error fetching dashboard pipeline stages:', error);
+        setPipelineStages([]);
+      }
+    };
+
+    fetchPipelineStages();
+  }, []);
 
   // Fetch Goal Context
   React.useEffect(() => {
@@ -512,6 +535,7 @@ export default function Dashboard() {
         }} 
         deal={viewingDeal}
         onUpdate={refetch}
+        stages={pipelineStages}
       />
     </div>
   );

@@ -24,6 +24,7 @@ const FunnelEliteCard = ({ deal, onEdit, onView, onDelete }) => {
   const hasAction = deal.status === 'hot' || deal.status === 'at-risk';
   const [showMenu, setShowMenu] = useState(false);
   const riskInfo = calculateDealRisk(deal.qualification);
+  const productLabel = deal.tags?.[0] || 'Sem produto';
 
   const displayValue = useMemo(() => (
     (deal.value !== undefined && deal.value !== null) 
@@ -47,8 +48,11 @@ const FunnelEliteCard = ({ deal, onEdit, onView, onDelete }) => {
       <div className="pt-8 px-8 pb-8 flex flex-col h-full relative z-10 box-border">
         <div className="flex justify-between items-start mb-4">
           <div className="flex gap-2 items-center">
-            <span className={cn('text-[10px] font-black px-3 py-1.2 rounded-full uppercase tracking-[0.2em] border border-current opacity-80', status.badgeClass)}>
-              {deal.tags?.[0] ?? status.label}
+            <span className={cn(
+              'text-[10px] font-black px-3 py-1.2 rounded-full uppercase tracking-[0.2em] border border-current opacity-80',
+              deal.tags?.[0] ? status.badgeClass : 'bg-slate-200/80 text-slate-500 border-slate-300'
+            )}>
+              {productLabel}
             </span>
             
             {riskInfo && (

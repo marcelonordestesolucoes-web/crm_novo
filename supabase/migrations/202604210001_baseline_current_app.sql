@@ -125,6 +125,9 @@ create table if not exists public.contacts (
   owner text,
   owner_avatar text,
   is_auto_created boolean default false,
+  is_blocked boolean not null default false,
+  blocked_at timestamptz,
+  blocked_reason text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

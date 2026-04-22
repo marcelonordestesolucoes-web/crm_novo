@@ -7,15 +7,20 @@ const corsHeaders = {
 };
 
 function normalizeChatId(body: Record<string, any>) {
-  const rawId = body.chatLid || body.senderLid || body.participantLid ||
-    body.chatId || body.phone || body.from ||
-    body.data?.chatLid || body.data?.senderLid || body.data?.participantLid ||
-    body.data?.chatId || body.data?.phone;
+  const isGroupPayload = Boolean(body.isGroup || body.data?.isGroup) ||
+    String(body.chatId || body.data?.chatId || body.from || body.data?.from || "").includes("@g.us");
+  const groupId = body.chatId || body.data?.chatId || body.from || body.data?.from ||
+    body.phone || body.data?.phone;
+  const rawId = isGroupPayload
+    ? groupId
+    : body.chatLid || body.senderLid || body.participantLid ||
+      body.chatId || body.phone || body.from ||
+      body.data?.chatLid || body.data?.senderLid || body.data?.participantLid ||
+      body.data?.chatId || body.data?.phone;
 
   if (!rawId) return null;
 
   let chatId = String(rawId);
-  const isGroupPayload = Boolean(body.isGroup || body.data?.isGroup);
 
   if (isGroupPayload && !chatId.includes("@g.us")) chatId += "@g.us";
   if (!chatId.includes("@")) chatId += "@c.us";
@@ -48,6 +53,13 @@ function normalizeContactPhone(body: Record<string, any>) {
   return null;
 }
 
+function detectGroup(body: Record<string, any>, chatId: string) {
+  return Boolean(body.isGroup || body.data?.isGroup) ||
+    chatId.includes("@g.us") ||
+    String(body.chatId || body.data?.chatId || "").includes("@g.us") ||
+    String(body.from || body.data?.from || "").includes("@g.us");
+}
+
 function isGenericName(name?: string | null) {
   if (!name) return true;
   return ["Contato WhatsApp", "Lead WhatsApp", "Grupo WhatsApp"].includes(name);
@@ -62,12 +74,71 @@ function firstMeaningfulName(...names: Array<unknown>) {
   return null;
 }
 
-async function fetchZapiContactName(identifiers: string[]) {
+function normalizePhoneValue(value: unknown) {
+  const raw = String(value || "").trim();
+  if (!raw || raw.includes("@lid") || raw.includes("@g.us")) return null;
+
+  const digits = raw.split("@")[0].replace(/\D/g, "");
+  return digits.length >= 10 && digits.length <= 15 ? digits : null;
+}
+
+function buildThreadAliases(params: {
+  chatId: string;
+  contactPhone: string | null;
+  contactId?: string | null;
+  isGroup?: boolean;
+}) {
+  const aliases = new Set<string>();
+  aliases.add(`chat:${params.chatId}`);
+
+  if (!params.isGroup && params.contactPhone) aliases.add(`phone:${params.contactPhone}`);
+  if (params.contactId) aliases.add(`contact:${params.contactId}`);
+
+  return [...aliases];
+}
+
+async function resolveThreadKey(
+  supabase: ReturnType<typeof createClient>,
+  orgId: string,
+  aliases: string[],
+) {
+  const { data } = await supabase
+    .from("whatsapp_thread_aliases")
+    .select("thread_key")
+    .eq("org_id", orgId)
+    .in("alias", aliases)
+    .limit(1)
+    .maybeSingle();
+
+  return data?.thread_key || aliases[0];
+}
+
+async function upsertThreadAliases(
+  supabase: ReturnType<typeof createClient>,
+  orgId: string,
+  threadKey: string,
+  aliases: string[],
+  contactId?: string | null,
+) {
+  const rows = aliases.map((alias) => ({
+    org_id: orgId,
+    thread_key: threadKey,
+    alias,
+    contact_id: contactId || null,
+    updated_at: new Date().toISOString(),
+  }));
+
+  await supabase
+    .from("whatsapp_thread_aliases")
+    .upsert(rows, { onConflict: "org_id,alias" });
+}
+
+async function fetchZapiContactMetadata(identifiers: string[]) {
   const instanceId = Deno.env.get("ZAPI_INSTANCE_ID");
   const instanceToken = Deno.env.get("ZAPI_INSTANCE_TOKEN");
   const clientToken = Deno.env.get("ZAPI_CLIENT_TOKEN");
 
-  if (!instanceId || !instanceToken) return null;
+  if (!instanceId || !instanceToken) return { name: null, phone: null };
 
   const headers: Record<string, string> = {};
   if (clientToken) headers["Client-Token"] = clientToken;
@@ -82,13 +153,14 @@ async function fetchZapiContactName(identifiers: string[]) {
 
       const data = await response.json().catch(() => null);
       const name = firstMeaningfulName(data?.name, data?.notify, data?.short, data?.vname);
-      if (name) return name;
+      const phone = normalizePhoneValue(data?.phone || data?.number || data?.id || data?.jid);
+      if (name || phone) return { name, phone };
     } catch (err) {
       console.warn("ZAPI CONTACT LOOKUP FAILED:", identifier, err);
     }
   }
 
-  return null;
+  return { name: null, phone: null };
 }
 
 function getMediaInfo(body: Record<string, any>) {
@@ -156,6 +228,25 @@ serve(async (req) => {
     const token = url.searchParams.get("token");
     const body = await req.json().catch(() => ({}));
 
+    await supabase.from("webhook_logs").insert({
+      status: "incoming",
+      headers: Object.fromEntries(req.headers.entries()),
+      payload: {
+        hasToken: Boolean(token),
+        keys: Object.keys(body || {}),
+        dataKeys: Object.keys(body?.data || {}),
+        isGroup: body.isGroup ?? body.data?.isGroup ?? null,
+        chatId: body.chatId ?? body.data?.chatId ?? null,
+        chatLid: body.chatLid ?? body.data?.chatLid ?? null,
+        senderLid: body.senderLid ?? body.data?.senderLid ?? null,
+        phone: body.phone ?? body.data?.phone ?? null,
+        from: body.from ?? body.data?.from ?? null,
+        senderName: body.senderName ?? body.data?.senderName ?? null,
+        chatName: body.chatName ?? body.data?.chatName ?? null,
+        type: body.type ?? body.data?.type ?? null,
+      },
+    });
+
     const { data: org } = await supabase
       .from("organizations")
       .select("id")
@@ -165,11 +256,24 @@ serve(async (req) => {
     if (!org) return new Response("Unauthorized", { status: 401, headers: corsHeaders });
 
     const chatId = normalizeChatId(body);
-    if (!chatId) return new Response("No ID", { headers: corsHeaders });
+    if (!chatId) {
+      await supabase.from("webhook_logs").insert({
+        status: "skipped_no_chat_id",
+        headers: Object.fromEntries(req.headers.entries()),
+        payload: {
+          keys: Object.keys(body || {}),
+          isGroup: body.isGroup ?? body.data?.isGroup ?? null,
+          chatId: body.chatId ?? body.data?.chatId ?? null,
+          phone: body.phone ?? body.data?.phone ?? null,
+          from: body.from ?? body.data?.from ?? null,
+          chatName: body.chatName ?? body.data?.chatName ?? null,
+        },
+      });
 
-    const isGroup = chatId.includes("@g.us");
-    const contactPhone = isGroup ? chatId : normalizeContactPhone(body);
-    const contactIdentity = contactPhone || chatId;
+      return new Response("No ID", { headers: corsHeaders });
+    }
+
+    const isGroup = detectGroup(body, chatId);
     const groupName = body.chatName || body.data?.chatName;
     const payloadName = firstMeaningfulName(
       body.senderName,
@@ -178,22 +282,22 @@ serve(async (req) => {
       body.pushName || body.data?.pushName ||
       body.notify || body.data?.notify,
     );
-    const zapiContactName = isGroup ? null : await fetchZapiContactName([
-      contactPhone || "",
+    const zapiContact = isGroup ? { name: null, phone: null } : await fetchZapiContactMetadata([
+      normalizeContactPhone(body) || "",
       chatId,
-      contactIdentity,
     ]);
-    const senderName = payloadName || zapiContactName;
+    const contactPhone = isGroup ? chatId : (normalizeContactPhone(body) || zapiContact.phone);
+    const contactIdentity = contactPhone || chatId;
+    const senderName = payloadName || zapiContact.name;
     const finalDisplayName = isGroup
-      ? (groupName || "Grupo WhatsApp")
-      : (senderName || "Lead WhatsApp");
+      ? (groupName || chatId)
+      : (senderName || contactPhone || chatId);
 
     const { data: existingThread } = await supabase
       .from("deal_conversations")
-      .select("contact_id, contact:contacts(id, name, phone)")
+        .select("deal_id, contact_id, contact:contacts(id, name, phone, is_blocked)")
       .eq("org_id", org.id)
       .eq("chat_id", chatId)
-      .not("contact_id", "is", null)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -203,7 +307,7 @@ serve(async (req) => {
     if (!contact && contactPhone) {
       const { data: contactByPhone } = await supabase
         .from("contacts")
-        .select("id, name, phone")
+        .select("id, name, phone, is_blocked")
         .eq("phone", contactPhone)
         .eq("org_id", org.id)
         .maybeSingle();
@@ -214,7 +318,7 @@ serve(async (req) => {
     if (!contact) {
       const { data: contactByIdentity } = await supabase
         .from("contacts")
-        .select("id, name, phone")
+        .select("id, name, phone, is_blocked")
         .eq("phone", contactIdentity)
         .eq("org_id", org.id)
         .maybeSingle();
@@ -222,22 +326,27 @@ serve(async (req) => {
       contact = contactByIdentity;
     }
 
-    if (!contact) {
-      const { data: createdContact } = await supabase
-        .from("contacts")
-        .insert({
-          name: finalDisplayName,
-          phone: contactIdentity,
-          org_id: org.id,
-          is_auto_created: true,
-        })
-        .select("id, name, phone")
-        .single();
-      contact = createdContact;
-    } else if (finalDisplayName && (isGenericName(contact.name) || (isGroup && groupName && contact.name !== groupName))) {
+    if (contact && finalDisplayName && (isGenericName(contact.name) || (isGroup && groupName && contact.name !== groupName))) {
       await supabase.from("contacts").update({ name: finalDisplayName }).eq("id", contact.id);
       contact = { ...contact, name: finalDisplayName };
     }
+
+    if (contact && !isGroup && contactPhone && contact.phone !== contactPhone) {
+      await supabase.from("contacts").update({ phone: contactPhone }).eq("id", contact.id);
+      contact = { ...contact, phone: contactPhone };
+    }
+
+    if (contact?.is_blocked) {
+      return new Response(JSON.stringify({ ok: true, skipped: "blocked_contact" }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const aliases = buildThreadAliases({ chatId, contactPhone, contactId: contact?.id, isGroup });
+    const threadKey = await resolveThreadKey(supabase, org.id, aliases);
+    await upsertThreadAliases(supabase, org.id, threadKey, aliases, contact?.id);
+    const canonicalChatId = threadKey.startsWith("chat:") ? threadKey.slice(5) : chatId;
 
     const media = getMediaInfo(body);
     const externalId = body.messageId || body.data?.messageId || `${chatId}-${Date.now()}`;
@@ -270,7 +379,8 @@ serve(async (req) => {
 
     const { error } = await supabase.from("deal_conversations").insert({
       org_id: org.id,
-      chat_id: chatId,
+      chat_id: canonicalChatId,
+      deal_id: existingThread?.deal_id || null,
       contact_id: contact?.id,
       sender_phone: contact?.phone || contactIdentity,
       content,
@@ -278,9 +388,10 @@ serve(async (req) => {
       source: "whatsapp",
       external_message_id: externalId,
       is_group: isGroup,
-      sender_name: senderName,
+      sender_name: isGroup ? finalDisplayName : senderName,
       message_type: media.type,
       media_url: media.url,
+      metadata: isGroup ? { participant_name: senderName } : {},
     });
 
     if (error) throw error;

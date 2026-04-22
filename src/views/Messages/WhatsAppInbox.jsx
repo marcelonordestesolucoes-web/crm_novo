@@ -7,6 +7,7 @@ import { useSupabase } from '@/hooks/useSupabase';
 import { getWhatsAppInbox, deleteChat } from '@/services/whatsapp';
 import { getConversationsByContext, createConversation } from '@/services/conversations';
 import { getUserPermissions } from '@/services/auth';
+import { getPipelines, getPipelineStages } from '@/services/pipelines';
 import { supabase } from '@/lib/supabase';
 import { LoadingSpinner, GlassCard, Modal, Badge } from '@/components/ui';
 import { DealForm } from '@/views/Funnel/DealForm';
@@ -27,8 +28,9 @@ export default function WhatsAppInbox() {
   const [isQualifying, setIsQualifying] = useState(false);
   const [analyzingIds, setAnalyzingIds] = useState(new Set());
    const [isGlobalAnalyzing, setIsGlobalAnalyzing] = useState(false);
-   const [showChatMenu, setShowChatMenu] = useState(false);
-   const [isDeleting, setIsDeleting] = useState(false);
+  const [showChatMenu, setShowChatMenu] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [defaultPipelineStageId, setDefaultPipelineStageId] = useState(null);
   
   // [AUDIO RECORDING v29] Estados para o Gravador de Voz
   const [isRecording, setIsRecording] = useState(false);
@@ -38,6 +40,27 @@ export default function WhatsAppInbox() {
   const timerIntervalRef = useRef(null);
   
   const { data: inbox, setData: setInbox, loading: loadingInbox, refetch: refetchInbox } = useSupabase(getWhatsAppInbox);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadDefaultStage() {
+      try {
+        const pipelines = await getPipelines();
+        if (!pipelines?.length) return;
+
+        const stages = await getPipelineStages(pipelines[0].id);
+        if (isMounted) setDefaultPipelineStageId(stages?.[0]?.id || null);
+      } catch (err) {
+        console.error('Erro ao carregar etapa inicial do pipeline:', err);
+      }
+    }
+
+    loadDefaultStage();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
   
   // [ELITE PERFORMANCE] Ordenação memorizada para evitar "travamentos" na UI
   const sortedInbox = React.useMemo(() => {
@@ -55,9 +78,116 @@ export default function WhatsAppInbox() {
   const activeChatId = activeChat?.id; // Usar a chave única reconstruída (c-ID ou p-Phone)
   const activeDealId = activeChat?.deal_id;
   const activeChatPhone = activeChat?.contact_phone;
+  const activeContactId = activeChat?.contact_id;
+  const activeThreadAliases = React.useMemo(() => activeChat?.thread_aliases || [], [activeChat?.thread_aliases]);
   const activeRecipientId = activeChatId?.includes('@lid') || activeChatId?.includes('@g.us')
     ? activeChatId
     : (activeChatPhone || activeChatId);
+  const canQualifyActiveChat = Boolean(activeChat) && (!activeDealId || activeChat?.is_qualified === false);
+
+  const isUuid = (value) =>
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || ''));
+
+  const normalizePhoneForMatch = (value) => String(value || '').replace(/\D/g, '');
+  const phonesMatch = (left, right) => {
+    const a = normalizePhoneForMatch(left);
+    const b = normalizePhoneForMatch(right);
+    if (!a || !b) return false;
+    return a === b || a.endsWith(b) || b.endsWith(a);
+  };
+
+  const findQualifiedDealForActiveThread = async () => {
+    const phoneCandidates = [
+      activeChatPhone,
+      activeChat?.contact_phone,
+      ...activeThreadAliases
+        .filter(alias => String(alias).startsWith('phone:'))
+        .map(alias => String(alias).slice(6))
+    ].filter(Boolean);
+
+    if (!phoneCandidates.length) return null;
+
+    const { orgId } = await getUserPermissions();
+    const { data, error } = await supabase
+      .from('deals')
+      .select(`
+        id, title, stage, status, is_qualified, created_at,
+        contacts:deal_contacts(contact:contacts(id, name, phone))
+      `)
+      .eq('org_id', orgId)
+      .neq('stage', 'lead')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    return (data || []).find(deal =>
+      deal.is_qualified !== false &&
+      (deal.contacts || []).some(link =>
+        phoneCandidates.some(phone => phonesMatch(phone, link.contact?.phone))
+      )
+    ) || null;
+  };
+
+  const linkActiveThreadToDeal = async (dealId) => {
+    if (!isUuid(dealId)) return;
+
+    const conditions = [];
+    if (activeChatId) conditions.push(`chat_id.eq.${activeChatId}`);
+    if (activeChatPhone) conditions.push(`sender_phone.eq.${activeChatPhone}`);
+    activeThreadAliases.forEach((alias) => {
+      const [type, ...valueParts] = String(alias).split(':');
+      const value = valueParts.join(':');
+      if (type === 'chat' && value) conditions.push(`chat_id.eq.${value}`);
+      if (type === 'phone' && value) conditions.push(`sender_phone.eq.${value}`);
+    });
+
+    if (!conditions.length) return;
+
+    const { orgId } = await getUserPermissions();
+    const { error } = await supabase
+      .from('deal_conversations')
+      .update({ deal_id: dealId })
+      .eq('org_id', orgId)
+      .or([...new Set(conditions)].join(','));
+
+    if (error) throw error;
+  };
+
+  const resolveDealIdForActiveThread = async (candidateDealId) => {
+    const qualifiedDeal = await findQualifiedDealForActiveThread();
+    if (qualifiedDeal?.id) {
+      await linkActiveThreadToDeal(qualifiedDeal.id);
+      return qualifiedDeal.id;
+    }
+
+    if (isUuid(candidateDealId)) return candidateDealId;
+
+    const conditions = [];
+    if (activeChatId) conditions.push(`chat_id.eq.${activeChatId}`);
+    if (activeChatPhone) conditions.push(`sender_phone.eq.${activeChatPhone}`);
+    activeThreadAliases.forEach((alias) => {
+      const [type, ...valueParts] = String(alias).split(':');
+      const value = valueParts.join(':');
+      if (type === 'chat' && value) conditions.push(`chat_id.eq.${value}`);
+      if (type === 'phone' && value) conditions.push(`sender_phone.eq.${value}`);
+    });
+
+    if (!conditions.length) return null;
+
+    const { orgId } = await getUserPermissions();
+    const { data, error } = await supabase
+      .from('deal_conversations')
+      .select('deal_id')
+      .eq('org_id', orgId)
+      .not('deal_id', 'is', null)
+      .or([...new Set(conditions)].join(','))
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    return isUuid(data?.deal_id) ? data.deal_id : null;
+  };
 
   // [ELITE PERFORMANCE] Sincronizar o chat ativo sem loops de re-renderização
   useEffect(() => {
@@ -74,7 +204,6 @@ export default function WhatsAppInbox() {
     i.last_message?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const isAutoCreated = activeChat?.is_qualified === false;
   const displayedMessages = React.useMemo(() => {
     const unique = [];
 
@@ -117,7 +246,9 @@ export default function WhatsAppInbox() {
           
           const chatIdx = prev.findIndex(chat => 
             chat.id === newMsg.chat_id || 
-            (newMsg.contact_id && chat.contact_id === newMsg.contact_id)
+            (newMsg.contact_id && chat.contact_id === newMsg.contact_id) ||
+            chat.thread_aliases?.includes(`chat:${newMsg.chat_id}`) ||
+            chat.thread_aliases?.includes(`phone:${newMsg.sender_phone}`)
           );
 
           if (chatIdx !== -1) {
@@ -144,25 +275,39 @@ export default function WhatsAppInbox() {
   // 2. Buscar mensagens quando selecionar um chat (Suporte a Leads e Deals)
   useEffect(() => {
     if (activeDealId || activeChatPhone || activeChatId) {
-      loadMessages({ dealId: activeDealId, phone: activeChatPhone, chatId: activeChatId });
+      loadMessages({
+        dealId: activeDealId,
+        phone: activeChatPhone,
+        chatId: activeChatId,
+        contactId: activeContactId,
+        aliases: activeThreadAliases
+      });
       
       const channel = supabase
         .channel(`chat-${activeDealId || activeChatPhone}`)
         .on('postgres_changes', { 
           event: 'INSERT', 
           schema: 'public', 
-          table: 'deal_conversations',
-          filter: `chat_id=eq.${activeChatId}` // Elite Filter: Specific to this JID
+          table: 'deal_conversations'
         }, (payload) => {
           if (payload.new) {
+            const newMsg = payload.new;
+            const belongsToActiveThread =
+              newMsg.chat_id === activeChatId ||
+              newMsg.contact_id === activeContactId ||
+              activeThreadAliases.includes(`chat:${newMsg.chat_id}`) ||
+              activeThreadAliases.includes(`phone:${newMsg.sender_phone}`);
+
+            if (!belongsToActiveThread) return;
+
             setMessages(prev => {
                // Evitar duplicidade com optimistic records
-               const alreadyExists = prev.some(m => m.id === payload.new.id || (m.is_optimistic && m.content === payload.new.content));
+               const alreadyExists = prev.some(m => m.id === newMsg.id || (m.is_optimistic && m.content === newMsg.content));
                if (alreadyExists) {
                   // Se já existe (ex: acabou de ser enviado pessimamente), só removemos a flag de otimismo se for o caso
-                  return prev.map(m => (m.is_optimistic && m.content === payload.new.content) ? payload.new : m);
+                  return prev.map(m => (m.is_optimistic && m.content === newMsg.content) ? newMsg : m);
                }
-               return [...prev, payload.new];
+               return [...prev, newMsg];
             });
           }
         })
@@ -173,7 +318,7 @@ export default function WhatsAppInbox() {
     } else {
       setMessages([]); // Limpar se nada estiver selecionado
     }
-  }, [activeDealId, activeChatPhone, activeChatId]);
+  }, [activeDealId, activeChatPhone, activeChatId, activeContactId, activeThreadAliases]);
 
   async function loadMessages(context) {
     try {
@@ -181,6 +326,48 @@ export default function WhatsAppInbox() {
       setMessages(msgs);
     } catch (err) {
       console.error(err);
+    }
+  }
+
+  async function handleQualifySuccess(savedDeal) {
+    const dealId = savedDeal?.id || activeDealId;
+
+    try {
+      if (dealId) {
+        const { orgId } = await getUserPermissions();
+        const conditions = [];
+
+        if (activeChatId) conditions.push(`chat_id.eq.${activeChatId}`);
+        if (activeChatPhone) conditions.push(`sender_phone.eq.${activeChatPhone}`);
+        activeThreadAliases.forEach((alias) => {
+          const [type, ...valueParts] = String(alias).split(':');
+          const value = valueParts.join(':');
+          if (type === 'chat' && value) conditions.push(`chat_id.eq.${value}`);
+          if (type === 'phone' && value) conditions.push(`sender_phone.eq.${value}`);
+        });
+
+        if (orgId && conditions.length) {
+          const { error } = await supabase
+            .from('deal_conversations')
+            .update({ deal_id: dealId })
+            .eq('org_id', orgId)
+            .or([...new Set(conditions)].join(','));
+
+          if (error) throw error;
+        }
+      }
+
+      setIsQualifying(false);
+      setActiveChat(prev => prev ? {
+        ...prev,
+        deal_id: dealId || prev.deal_id,
+        is_qualified: true,
+        stage_label: savedDeal?.stage || prev.stage_label
+      } : prev);
+      await refetchInbox();
+    } catch (err) {
+      console.error('Erro ao vincular conversa ao pipeline:', err);
+      alert('O lead foi salvo, mas houve falha ao vincular o histórico da conversa. Recarregue a tela e tente novamente.');
     }
   }
 
@@ -457,7 +644,7 @@ export default function WhatsAppInbox() {
           org_id: orgId,
           responsible_id: user.id,
           company_id: targetCompanyId, // FIX: Campo obrigatório no schema real
-          stage: 'lead',
+          stage: defaultPipelineStageId || 'lead',
           status: 'open',
           value: 1000
         }).select().single();
@@ -468,11 +655,7 @@ export default function WhatsAppInbox() {
         currentDealId = newDeal.id;
         
         // Vincular mensagens IMEDIATAMENTE (Retroatividade)
-        const { error: linkError } = await supabase.from('deal_conversations')
-          .update({ deal_id: newDeal.id })
-          .eq('sender_phone', anchorPhone);
-          
-        if (linkError) console.warn('[Stitch Oracle] Erro menor ao vincular mensagens:', linkError);
+        await linkActiveThreadToDeal(newDeal.id);
         
         // [Elite Fix] Garantir que o estado local reflita o novo Deal
         setActiveChat(prev => ({ ...prev, deal_id: newDeal.id }));
@@ -483,9 +666,18 @@ export default function WhatsAppInbox() {
 
       console.log('[Stitch Oracle] Invocando Cérebro Global...');
 
-      const { data: functionData, error: functionError } = await supabase.functions.invoke('analyze-conversation', {
+      currentDealId = await resolveDealIdForActiveThread(currentDealId);
+      if (!currentDealId) {
+        throw new Error('Nao foi possivel localizar um negocio valido para analisar esta conversa.');
+      }
+
+      const invokePromise = supabase.functions.invoke('analyze-conversation', {
         body: { deal_id: currentDealId, global: true }
       });
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Tempo limite atingido na análise. Tente novamente em alguns segundos.')), 45000);
+      });
+      const { data: functionData, error: functionError } = await Promise.race([invokePromise, timeoutPromise]);
       
       if (functionError) throw functionError;
       if (functionData?.error) throw new Error(functionData.error);
@@ -505,6 +697,12 @@ export default function WhatsAppInbox() {
             } 
           : chat
       ));
+      setActiveChat(prev => prev ? {
+        ...prev,
+        deal_id: currentDealId,
+        ai_global_analysis: aiResponse || prev.ai_global_analysis,
+        is_qualified: true
+      } : prev);
 
       // 3. [BACKUP SYNC] Opcional: Refetch longo prazo
       setTimeout(async () => {
@@ -513,6 +711,10 @@ export default function WhatsAppInbox() {
            setInbox(prev => prev?.map(chat => 
              chat.deal_id === currentDealId ? { ...chat, ai_global_analysis: updatedDeal.ai_global_analysis } : chat
            ));
+           setActiveChat(prev => prev && prev.deal_id === currentDealId
+             ? { ...prev, ai_global_analysis: updatedDeal.ai_global_analysis }
+             : prev
+           );
          }
       }, 1000);
     } catch (err) {
@@ -733,13 +935,13 @@ export default function WhatsAppInbox() {
 
                 <div className="h-8 w-px bg-slate-200 mx-2" />
 
-                {isAutoCreated && (
+                {canQualifyActiveChat && (
                   <button 
                     onClick={() => setIsQualifying(true)}
                     className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.1em] hover:scale-105 transition-all shadow-lg shadow-primary/20"
                   >
                     <Rocket className="w-3.5 h-3.5" />
-                    Adicionar ao Funil
+                    Adicionar ao Pipeline
                   </button>
                 )}
                 <div className="h-8 w-px bg-slate-200 mx-2" />
@@ -1192,12 +1394,9 @@ export default function WhatsAppInbox() {
                 company: activeChat?.contact_name,
                 contacts: [{ name: activeChat?.contact_name, phone: activeChat?.contact_phone || '', role: 'Lead WhatsApp' }],
                 leadSource: 'Whatsapp',
-                stage: activeChat?.stage
+                stage: activeChat?.stage || defaultPipelineStageId
               }}
-              onSuccess={() => {
-                setIsQualifying(false);
-                refetchInbox();
-              }}
+              onSuccess={handleQualifySuccess}
               onCancel={() => setIsQualifying(false)}
             />
         </div>

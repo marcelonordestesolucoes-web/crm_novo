@@ -28,3 +28,7 @@ dist-ssr
 *.sln
 *.sw?
 .vercel
+
+# Supabase local metadata and database backups
+supabase/.temp/
+backup_pre_cleanup_*.sql

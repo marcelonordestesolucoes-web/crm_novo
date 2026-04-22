@@ -3,9 +3,20 @@
 // Schema real: id, title, company_id, value, stage, status, owner_id, organization_id, created_at
 
 import { supabase } from '@/lib/supabase';
-import { PIPELINE_STAGES } from '@/constants/config';
 import { getUserPermissions } from './auth';
 import { attributeAISuccess } from './aiTracking';
+
+async function getStageLabel(stageId) {
+  if (!stageId) return 'Sem etapa';
+
+  const { data } = await supabase
+    .from('pipeline_stages')
+    .select('label')
+    .eq('id', stageId)
+    .maybeSingle();
+
+  return data?.label || stageId;
+}
 
 /**
  * Utilitário para converter a coluna "product" (Texto ou JSON) em array de objetos.
@@ -74,6 +85,10 @@ export async function getDeals() {
   // Normaliza para o formato esperado pelos componentes
   return data.map((deal) => {
     const products = parseProducts(deal.product, deal.value, deal.title);
+    const productTags = products
+      .map(product => product?.name?.trim())
+      .filter(Boolean)
+      .filter(name => name.toLowerCase() !== String(deal.title || '').trim().toLowerCase());
     
     // Mapeamento profundo para os contatos vinculados
     const contacts = deal.contacts ? deal.contacts.map(c => c.contact).filter(Boolean) : [];
@@ -88,7 +103,7 @@ export async function getDeals() {
       stage:       deal.stage ?? 'lead',
       stageLabel:  stageMap[deal.stage] || deal.stage, 
       status:      deal.status || 'open',
-      tags:        products.length > 0 ? [products[0].name] : [],
+      tags:        productTags,
       ownerName:   deal.responsible?.full_name || 'Desconhecido',
       ownerAvatar: deal.responsible?.avatar_url || null,
       createdAt:   deal.created_at,
@@ -280,15 +295,26 @@ export async function updateDeal(id, payload) {
   const { orgId } = await getUserPermissions();
 
   // 1. Atualizar Tabela de Negócios (Dados Básicos)
-  const cleanPayload = {
-    title: payload.title,
-    value: payload.value,
-    stage: payload.stage,
-    status: payload.status,
-    product: payload.products ? JSON.stringify(payload.products) : null,
-    qualification: payload.qualification || {},
-    is_qualified: payload.is_qualified !== undefined ? payload.is_qualified : undefined
-  };
+  const cleanPayload = {};
+  if (payload.title !== undefined) cleanPayload.title = payload.title;
+  if (payload.value !== undefined) cleanPayload.value = payload.value;
+  if (payload.stage !== undefined) cleanPayload.stage = payload.stage;
+  if (payload.status !== undefined) cleanPayload.status = payload.status;
+  if (payload.products !== undefined) cleanPayload.product = JSON.stringify(payload.products || []);
+  if (payload.qualification !== undefined) cleanPayload.qualification = payload.qualification || {};
+  if (payload.is_qualified !== undefined) cleanPayload.is_qualified = payload.is_qualified;
+
+  if (Object.keys(cleanPayload).length === 0) {
+    const { data: existingDeal, error: existingError } = await supabase
+      .from('deals')
+      .select('*')
+      .eq('id', id)
+      .eq('org_id', orgId)
+      .single();
+
+    if (existingError) throw existingError;
+    return existingDeal;
+  }
 
   const { data: updatedDeal, error: dealError } = await supabase
     .from('deals')
@@ -384,11 +410,34 @@ export async function updateDeal(id, payload) {
   }
 
   // 5. Timeline Log de Edição
-  await supabase.from('deal_timeline').insert([{
-     deal_id: id,
-     type: 'updated',
-     description: `Oportunidade "${updatedDeal.title}" atualizada globalmente`
-  }]);
+  const shouldLogUpdate = Boolean(
+    payload.logTimeline ||
+    payload.title !== undefined ||
+    payload.value !== undefined ||
+    payload.status !== undefined ||
+    payload.products !== undefined ||
+    payload.contacts !== undefined ||
+    payload.taxId !== undefined ||
+    payload.segment !== undefined
+  );
+
+  if (shouldLogUpdate) {
+    const changes = [];
+    if (payload.title !== undefined) changes.push('nome');
+    if (payload.value !== undefined) changes.push('valor');
+    if (payload.status !== undefined) changes.push('status');
+    if (payload.products !== undefined) changes.push('produtos');
+    if (payload.contacts !== undefined) changes.push('contatos');
+    if (payload.taxId !== undefined || payload.segment !== undefined) changes.push('empresa');
+
+    await supabase.from('deal_timeline').insert([{
+       deal_id: id,
+       type: 'updated',
+       description: changes.length
+        ? `Dados atualizados: ${[...new Set(changes)].join(', ')}`
+        : `Oportunidade "${updatedDeal.title}" atualizada`
+    }]);
+  }
 
   return updatedDeal;
 }
@@ -447,7 +496,7 @@ export async function moveDealStage(id, newStage) {
   await attributeAISuccess(id);
 
   // Registrar na deal_timeline automaticamente
-  const stageLabel = PIPELINE_STAGES.find(s => s.id === newStage)?.label || newStage;
+  const stageLabel = await getStageLabel(newStage);
   await supabase.from('deal_timeline').insert([{
     deal_id:     id,
     type:        'stage_change',

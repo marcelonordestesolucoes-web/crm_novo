@@ -112,12 +112,13 @@ export const DealForm = ({ initialData, onSuccess, onCancel }) => {
     };
 
     try {
+      let savedDeal;
       if (initialData?.id) {
-        await updateDeal(initialData.id, dealPayload);
+        savedDeal = await updateDeal(initialData.id, dealPayload);
       } else {
-        await createDeal(dealPayload);
+        savedDeal = await createDeal(dealPayload);
       }
-      onSuccess();
+      onSuccess(savedDeal);
     } catch (err) {
       console.error('Error saving deal:', err);
       // Supabase errors are often objects { message, details, code }
