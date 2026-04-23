@@ -33,8 +33,8 @@ const ContactCard = ({ contact }) => (
           {contact.name}
         </h3>
         <div className="flex flex-col gap-1 items-center">
-          <p className="text-[10px] font-black text-primary uppercase tracking-[0.2em]">{contact.role}</p>
-          <div className="flex items-center gap-2 text-[11px] text-slate-400 font-bold uppercase tracking-widest opacity-60">
+          <p className="text-xs font-black text-primary uppercase tracking-widest">{contact.role}</p>
+          <div className="flex items-center gap-2 text-sm text-slate-700 font-bold uppercase tracking-widest">
             <span className="material-symbols-outlined text-sm">business</span>
             {contact.company}
           </div>
@@ -57,7 +57,7 @@ const ContactCard = ({ contact }) => (
           size="sm"
           className="w-8 h-8 border-white/60 shadow-sm"
         />
-        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest opacity-60">
+        <span className="text-xs font-black text-slate-700 uppercase tracking-widest">
           {contact.ownerPosition}
         </span>
       </div>
@@ -69,9 +69,9 @@ const ContactCard = ({ contact }) => (
 );
 
 const ContactRow = ({ icon, label }) => (
-  <div className="flex items-center gap-3 text-xs text-on-surface-variant hover:text-primary transition-colors cursor-pointer group/r">
-    <span className="material-symbols-outlined text-base opacity-40 group-hover/r:opacity-100">{icon}</span>
-    <span className="font-medium truncate">{label}</span>
+  <div className="flex items-center gap-3 text-sm text-slate-700 hover:text-primary transition-colors cursor-pointer group/r">
+    <span className="material-symbols-outlined text-base opacity-70 group-hover/r:opacity-100">{icon}</span>
+    <span className="font-semibold truncate">{label}</span>
   </div>
 );
 
@@ -91,14 +91,14 @@ export default function Contacts() {
         actions={<Button icon="person_add">Novo Contato</Button>}
       />
 
-      <div className="flex items-center gap-4 bg-white/70 backdrop-blur-2xl p-3 rounded-[2rem] border border-white/40 mb-10 shadow-[0_10px_40px_rgba(0,0,0,0.05)] max-w-2xl ring-1 ring-blue-500/10 hover:shadow-lg transition-all duration-500">
+      <div className="flex items-center gap-4 bg-[linear-gradient(135deg,rgba(255,255,255,0.82),rgba(196,250,255,0.48),rgba(250,230,255,0.34))] backdrop-blur-2xl p-3 rounded-[2rem] border border-white/60 mb-10 shadow-[0_18px_45px_rgba(15,23,42,0.08)] max-w-2xl ring-1 ring-slate-900/5 hover:shadow-lg transition-all duration-500">
         <SearchBar
           placeholder="Buscar por nome, cargo ou empresa..."
           value={query}
           onChange={setQuery}
           className="bg-transparent border-0 shadow-none focus-within:ring-0 flex-1"
         />
-        <button className="w-12 h-12 rounded-2xl border border-white/60 bg-white/50 hover:bg-white text-slate-400 hover:text-primary transition-all flex items-center justify-center shadow-sm active:scale-95">
+        <button className="w-12 h-12 rounded-2xl border border-slate-300 bg-white/80 hover:bg-white text-slate-700 hover:text-primary transition-all flex items-center justify-center shadow-sm active:scale-95">
           <span className="material-symbols-outlined">filter_list</span>
         </button>
       </div>

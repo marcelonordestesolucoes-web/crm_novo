@@ -41,28 +41,29 @@ const FunnelEliteCard = ({ deal, onEdit, onView, onDelete }) => {
         e.dataTransfer.effectAllowed = 'move';
       }}
       // ALTURA MID-SIZE ELITE (v203)
-      className="relative overflow-hidden h-[210px] w-full border-white/10 ring-1 ring-white/5 flex-shrink-0 cursor-grab active:cursor-grabbing"
+      className="relative overflow-hidden h-[210px] w-full border-white/60 ring-1 ring-slate-900/5 flex-shrink-0 cursor-grab active:cursor-grabbing bg-[linear-gradient(135deg,rgba(255,255,255,0.88),rgba(196,250,255,0.58),rgba(250,230,255,0.44))] shadow-[0_18px_45px_rgba(15,23,42,0.12)] hover:shadow-[0_28px_70px_rgba(15,23,42,0.16)]"
       onClick={() => onView(deal)}
     >
+      <div className="absolute inset-0 bg-gradient-to-br from-primary/[0.04] via-transparent to-cyan-400/[0.08] pointer-events-none" />
       {/* 🛡️ RESPIRO MID-SIZE */}
       <div className="pt-8 px-8 pb-8 flex flex-col h-full relative z-10 box-border">
         <div className="flex justify-between items-start mb-4">
           <div className="flex gap-2 items-center">
             <span className={cn(
-              'text-[10px] font-black px-3 py-1.2 rounded-full uppercase tracking-[0.2em] border border-current opacity-80',
-              deal.tags?.[0] ? status.badgeClass : 'bg-slate-200/80 text-slate-500 border-slate-300'
+              'text-xs font-black px-3 py-1.5 rounded-full uppercase tracking-widest border shadow-sm',
+              deal.tags?.[0] ? 'bg-white text-primary border-primary/20' : 'bg-slate-100 text-slate-700 border-slate-200'
             )}>
               {productLabel}
             </span>
             
             {riskInfo && (
               <div className={cn(
-                "flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border backdrop-blur-md transition-all duration-500",
+                "flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border backdrop-blur-md transition-all duration-500 shadow-sm",
                 riskInfo.risk === 'high' 
-                  ? "bg-red-500/20 border-red-500/40 text-red-400 shadow-[0_0_12px_rgba(239,68,68,0.3)]" :
+                  ? "bg-red-50 border-red-200 text-red-600" :
                 riskInfo.risk === 'medium' 
-                  ? "bg-amber-500/20 border-amber-500/40 text-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.3)]" :
-                "bg-emerald-500/20 border-emerald-500/40 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.3)]"
+                  ? "bg-amber-50 border-amber-200 text-amber-700" :
+                "bg-emerald-50 border-emerald-200 text-emerald-700"
               )}>
                 <div className={cn(
                   "w-2 h-2 rounded-full animate-pulse shadow-sm",
@@ -70,7 +71,7 @@ const FunnelEliteCard = ({ deal, onEdit, onView, onDelete }) => {
                   riskInfo.risk === 'medium' ? "bg-amber-500 shadow-amber-500/50" :
                   "bg-emerald-500 shadow-emerald-500/50"
                 )} />
-                <span className="text-[10px] font-black uppercase tracking-[0.15em] leading-none drop-shadow-sm">
+                <span className="text-xs font-black uppercase tracking-widest leading-none">
                   {riskInfo.risk === 'high' ? 'Alto Risco' :
                    riskInfo.risk === 'medium' ? 'Médio Risco' : 'Baixo Risco'}
                 </span>
@@ -79,7 +80,7 @@ const FunnelEliteCard = ({ deal, onEdit, onView, onDelete }) => {
           </div>
           <div className="relative">
             <MoreHorizontal 
-              className="w-5 h-5 text-slate-300 group-hover/elite:text-primary transition-colors cursor-pointer" 
+              className="w-5 h-5 text-slate-600 group-hover/elite:text-primary transition-colors cursor-pointer" 
               onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
             />
             {showMenu && (
@@ -114,22 +115,22 @@ const FunnelEliteCard = ({ deal, onEdit, onView, onDelete }) => {
           </div>
         </div>
 
-        <h4 className="font-manrope font-black text-sm text-white leading-tight mb-1 line-clamp-2">
+        <h4 className="font-manrope font-black text-lg text-slate-950 leading-tight mb-1 line-clamp-2">
           {deal.title}
         </h4>
-        <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mb-4 opacity-70">
+        <p className="text-xs text-slate-700 font-black uppercase tracking-widest mb-4">
           {deal.company || 'Oportunidade'}
         </p>
 
         {/* RODAPÉ ELEVADO UNIFICADO */}
         <div className="flex justify-between items-end mt-auto">
-          <p className="text-xl font-manrope font-black text-white tracking-tighter leading-none">
+          <p className="text-2xl font-manrope font-black text-slate-950 tracking-tighter leading-none">
             {displayValue}
           </p>
           
           <div className="flex items-center gap-3">
             {hasAction && (
-              <div className={cn('flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest opacity-60', status.actionClass)}>
+              <div className={cn('flex items-center gap-1.5 text-xs font-black uppercase tracking-widest', status.actionClass)}>
                 <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>
                   {status.actionIcon}
                 </span>
@@ -140,7 +141,7 @@ const FunnelEliteCard = ({ deal, onEdit, onView, onDelete }) => {
                src={deal.ownerAvatar || null} 
                name={deal.ownerName || 'Staff'} 
                size="sm" 
-               className="w-7 h-7 border-white/80 ring-2 ring-white/20 shadow-xl bg-slate-800"
+               className="w-9 h-9 border-white/90 ring-2 ring-white/70 shadow-xl bg-white"
              />
           </div>
         </div>
@@ -162,18 +163,18 @@ const FunnelEliteStage = React.memo(({ stage, deals, onNew, onEdit, onView, onDe
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-4">
             <div className={cn('w-4 h-4 rounded-full shadow-2xl transition-all', stage.color)} />
-            <h3 className="font-manrope font-black text-sm tracking-[0.2em] text-on-surface uppercase opacity-90">
+            <h3 className="font-manrope font-black text-base tracking-widest text-slate-950 uppercase">
               {stage.label}
             </h3>
-            <span className="text-[11px] text-slate-400 font-black bg-white/50 backdrop-blur-sm px-3 py-1 rounded-full border border-white/40">
+            <span className="text-xs text-slate-700 font-black bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/60 shadow-sm">
                {deals.length}
             </span>
           </div>
-          <button onClick={() => onNew(stage.id)} className="w-9 h-9 rounded-full hover:bg-primary/10 text-slate-300 hover:text-primary transition-all flex items-center justify-center bg-white/40 border border-white/20 shadow-sm active:scale-95">
+          <button onClick={() => onNew(stage.id)} className="w-10 h-10 rounded-full hover:bg-primary/10 text-slate-700 hover:text-primary transition-all flex items-center justify-center bg-white/80 border border-white/60 shadow-sm active:scale-95">
             <Plus className="w-5 h-5" />
           </button>
         </div>
-        <p className="text-3xl font-manrope font-black text-on-surface tracking-tighter opacity-90">
+        <p className="text-3xl font-manrope font-black text-slate-950 tracking-tighter">
           {formatCurrency(stage.totalValue)}
         </p>
       </div>
@@ -209,7 +210,7 @@ const FunnelEliteStage = React.memo(({ stage, deals, onNew, onEdit, onView, onDe
         
         <button 
           onClick={() => onNew(stage.id)}
-          className="w-full py-8 border-2 border-dashed border-slate-200 rounded-[2.5rem] text-slate-400 hover:border-primary/30 hover:text-primary transition-all flex flex-col items-center justify-center gap-3 font-manrope font-black text-[10px] uppercase tracking-[0.2em] hover:bg-white/80 group mt-2"
+          className="w-full py-8 border-2 border-dashed border-slate-300 rounded-[2.5rem] text-slate-700 hover:border-primary/30 hover:text-primary transition-all flex flex-col items-center justify-center gap-3 font-manrope font-black text-xs uppercase tracking-widest hover:bg-white/80 group mt-2"
         >
           <div className="w-12 h-12 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-primary/10 transition-all shadow-sm">
             <Plus className="w-6 h-6" />
@@ -350,14 +351,14 @@ export default function FunnelView() {
   };
 
   return (
-    <div className="animate-in fade-in duration-700 flex flex-col h-full overflow-hidden relative -mt-16 z-10 font-manrope">
+    <div className="animate-in fade-in duration-700 flex flex-col min-h-full overflow-visible relative -mt-14 z-10 font-manrope pl-4 lg:pl-8 pr-4">
       {/* Aurora Backdrop */}
       <div className="absolute -top-20 left-1/4 w-[900px] h-[500px] bg-blue-500/[0.08] blur-[150px] rounded-full pointer-events-none -z-10" />
       
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 gap-4">
-        <div>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 gap-4 min-w-0">
+        <div className="min-w-0">
           <h2 className="text-4xl font-black text-on-surface tracking-tighter">Pipeline Ativo</h2>
-          <div className="flex items-center gap-3 mt-4 overflow-x-auto pb-2 no-scrollbar">
+          <div className="flex items-center gap-3 mt-4 flex-wrap pb-2 max-w-full">
              {pipelines.map(p => (
                <button
                  key={p.id}
@@ -374,7 +375,7 @@ export default function FunnelView() {
              ))}
           </div>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-3 shrink-0">
           <button className="px-6 py-3 rounded-2xl bg-white/60 backdrop-blur-md border border-white/40 text-xs font-black uppercase tracking-widest text-slate-600 flex items-center gap-2 hover:bg-white transition-all shadow-sm">
             <Filter className="w-4 h-4" /> Filtrar
           </button>
@@ -403,7 +404,7 @@ export default function FunnelView() {
 
       {!error && (stages?.length > 0 || deals?.length > 0) && (
         <div className={cn(
-          "flex gap-8 overflow-x-auto pb-12 items-start snap-x flex-1 custom-scrollbar transition-opacity duration-700",
+          "flex gap-8 overflow-x-auto overflow-y-visible pb-12 items-start snap-x flex-1 custom-scrollbar transition-opacity duration-700 pl-1",
           (loadingDeals || loadingStages) ? "opacity-60 grayscale-[0.2]" : "opacity-100"
         )}>
           <AnimatePresence mode="popLayout">

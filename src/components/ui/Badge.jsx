@@ -26,7 +26,7 @@ const variants = {
 };
 
 export const Badge = ({ variant = 'default', label, className, ...props }) => {
-  const base = 'inline-flex items-center text-[9px] font-extrabold px-2 py-0.5 rounded uppercase tracking-[0.1em]';
+  const base = 'inline-flex items-center text-xs font-black px-3 py-1 rounded-full uppercase tracking-widest';
   const variantClass = variants[variant] ?? variants.default;
 
   return (

@@ -3,3 +3,6 @@ verify_jwt = false
 
 [functions.whatsapp-webhook]
 verify_jwt = false
+
+[functions.campaign-worker]
+verify_jwt = false

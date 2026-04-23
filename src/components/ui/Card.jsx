@@ -16,10 +16,10 @@ export const Card = ({
 }) => {
   const variants = {
     default: cn(
-      'bg-white rounded-3xl border border-outline-variant/10 shadow-sm',
+      'bg-white/85 backdrop-blur-2xl rounded-[2rem] border border-white/60 shadow-[0_18px_45px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/5',
       elevated && 'shadow-lg'
     ),
-    glass: 'bg-white/60 backdrop-blur-[32px] backdrop-saturate-[2.0] rounded-[2.5rem] border border-white/20 shadow-sm hover:shadow-xl transition-all duration-500',
+    glass: 'bg-[linear-gradient(135deg,rgba(255,255,255,0.82),rgba(196,250,255,0.48),rgba(250,230,255,0.38))] backdrop-blur-[32px] backdrop-saturate-[2.0] rounded-[2rem] border border-white/60 shadow-[0_18px_45px_rgba(15,23,42,0.10)] ring-1 ring-slate-900/5 hover:shadow-[0_28px_70px_rgba(15,23,42,0.14)] transition-all duration-500',
     ultra: 'bg-white/65 backdrop-blur-[40px] backdrop-saturate-[2.5] rounded-[2.5rem] border border-white/30 ring-4 ring-blue-500/15 shadow-[0_50px_120px_rgba(59,130,246,0.25)] transition-all duration-500',
     crystal: 'bg-white/45 prism-glass rounded-[2.5rem] border border-white/40 shadow-[0_25px_50px_-12px_rgba(30,41,59,0.12)] transition-all duration-500',
     none: '',

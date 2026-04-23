@@ -108,6 +108,8 @@ body {
   display: flex;
   min-width: 320px;
   min-height: 100vh;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.22) transparent;
 }
 
 #root {
@@ -115,6 +117,25 @@ body {
 }
 
 .font-manrope { font-family: 'Manrope', sans-serif; }
+
+.field-input {
+  width: 100%;
+  border-radius: 1rem;
+  border: 1px solid rgb(226 232 240);
+  background: rgba(248, 250, 252, 0.75);
+  padding: 1rem 1.5rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #0f172a;
+  outline: none;
+  transition: box-shadow 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+.field-input:focus {
+  border-color: rgba(0, 62, 199, 0.3);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 4px rgba(0, 62, 199, 0.06);
+}
 
 .glass-panel {
   background: rgba(255, 255, 255, 0.6);
@@ -157,4 +178,67 @@ body {
 
 .custom-scrollbar:hover::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.25);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.18) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.34),
+    rgba(0, 62, 199, 0.18),
+    rgba(15, 23, 42, 0.18)
+  );
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  min-height: 56px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.56),
+    rgba(0, 62, 199, 0.34),
+    rgba(15, 23, 42, 0.28)
+  );
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.32) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.28);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+.custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.48);
 }

@@ -53,7 +53,11 @@ function normalizeRecipientPhone(value: unknown) {
   const raw = String(value || "").trim();
   if (!raw) return "";
 
-  if (raw.includes("@lid") || raw.includes("@g.us")) {
+  if (raw.includes("@g.us")) {
+    return raw.replace("@g.us", "");
+  }
+
+  if (raw.includes("@lid")) {
     return raw;
   }
 

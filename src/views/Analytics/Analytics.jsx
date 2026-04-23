@@ -86,16 +86,16 @@ export default function Analytics() {
         title="Analytics Inteligente"
         subtitle="Métricas reais extraídas diretamente do seu banco de dados Supabase."
         actions={
-          <div className="flex bg-white/70 backdrop-blur-2xl p-2 rounded-[1.5rem] border border-white/40 shadow-[0_10px_40px_rgba(0,0,0,0.05)] ring-1 ring-blue-500/10">
+            <div className="flex bg-[linear-gradient(135deg,rgba(255,255,255,0.82),rgba(196,250,255,0.48),rgba(250,230,255,0.34))] backdrop-blur-2xl p-2 rounded-[1.5rem] border border-white/60 shadow-[0_18px_45px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/5">
             {PERIODS.map((p, i) => (
               <button
                 key={p}
                 onClick={() => setActivePeriod(i)}
                 className={cn(
-                  'px-6 py-2.5 rounded-xl text-xs font-black font-manrope transition-all tracking-widest uppercase',
+                  'px-6 py-2.5 rounded-xl text-sm font-black font-manrope transition-all tracking-widest uppercase',
                   i === activePeriod
                     ? 'bg-white text-primary shadow-lg shadow-primary/10'
-                    : 'text-on-surface-variant/60 hover:text-on-surface'
+                    : 'text-slate-700 hover:text-on-surface'
                 )}
               >
                 {p}
@@ -119,7 +119,7 @@ export default function Analytics() {
                   <div className={cn('w-14 h-14 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform shadow-sm relative z-10', kpi.bg, kpi.colorText)}>
                     <Icon className="w-7 h-7" />
                   </div>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mb-2 opacity-60 relative z-10">{kpi.label}</p>
+                  <p className="text-xs font-black text-slate-700 uppercase tracking-widest mb-2 relative z-10">{kpi.label}</p>
                   <h3 className="text-3xl font-manrope font-black text-on-surface tracking-tighter relative z-10">{kpi.value}</h3>
                 </Card>
               );
@@ -133,7 +133,7 @@ export default function Analytics() {
                 <BarChart3 className="w-10 h-10 text-primary opacity-40 group-hover:opacity-100 transition-all" />
               </div>
               <h4 className="font-manrope font-black text-2xl text-on-surface mb-3 tracking-tight">Distribuição por Estágio</h4>
-              <p className="text-slate-500 text-sm max-w-sm font-manrope font-bold leading-relaxed opacity-60 mb-12">
+              <p className="text-slate-700 text-base max-w-sm font-manrope font-bold leading-relaxed mb-12">
                 Volume financeiro distribuído ao longo do seu funil de vendas.
               </p>
               <div className="w-full h-56 rounded-[2.5rem] bg-white/40 backdrop-blur-2xl border border-white/40 flex items-end justify-center gap-6 px-12 pb-8 group-hover:border-primary/20 transition-all shadow-inner relative overflow-hidden">
@@ -146,11 +146,11 @@ export default function Analytics() {
                       transition={{ duration: 0.8, delay: i * 0.1 }}
                       className={cn("w-full rounded-2xl shadow-lg border-b-4 border-white/20 relative group/bar", stage.color)}
                     >
-                       <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-on-surface text-white text-[9px] font-black px-2 py-1 rounded opacity-0 group-hover/bar:opacity-100 transition-opacity">
+                       <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-on-surface text-white text-xs font-black px-2 py-1 rounded opacity-0 group-hover/bar:opacity-100 transition-opacity">
                          {chartBars[i].toFixed(0)}%
                        </div>
                     </motion.div>
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest rotate-[-45deg] origin-top-left -ml-2 opacity-60">{stage.label}</span>
+                    <span className="text-xs font-black text-slate-700 uppercase tracking-widest rotate-[-45deg] origin-top-left -ml-2">{stage.label}</span>
                   </div>
                 ))}
               </div>
@@ -164,12 +164,12 @@ export default function Analytics() {
                     <div className={cn('w-2 rounded-full shrink-0 group-hover:scale-y-110 transition-transform origin-top shadow-sm', item.color)} style={{ minHeight: 64 }} />
                     <div>
                       <p className="text-lg font-manrope font-black text-on-surface mb-1.5 group-hover:text-primary transition-colors tracking-tight">{item.title}</p>
-                      <p className="text-sm text-slate-500 leading-relaxed font-manrope font-bold opacity-70 tracking-tight">{item.desc}</p>
+                      <p className="text-base text-slate-700 leading-relaxed font-manrope font-bold tracking-tight">{item.desc}</p>
                     </div>
                   </div>
                 ))}
                 
-                <div className="mt-12 p-8 rounded-[2rem] bg-white/20 backdrop-blur-md border border-white/40 italic text-xs font-manrope font-bold text-slate-400 leading-relaxed tracking-tight">
+                <div className="mt-12 p-8 rounded-[2rem] bg-white/50 backdrop-blur-md border border-white/60 italic text-sm font-manrope font-bold text-slate-700 leading-relaxed tracking-tight">
                   "Os dados acima são calculados em tempo real com base nos seus negócios fechados como 
                   <span className="font-black text-primary"> 'Ganho' (closed_won)</span> e volume total do pipeline."
                 </div>

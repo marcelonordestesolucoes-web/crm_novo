@@ -31,7 +31,7 @@ const CompanyRow = ({ company, onEdit, onDelete }) => {
             </h3>
             <Badge variant={stageConfig.variant} className={cn("px-4 py-1.5 rounded-full text-[10px] uppercase font-black tracking-widest border border-white/40", stageConfig.badgeClass)} label={company.stage} />
           </div>
-          <div className="flex items-center gap-6 text-[11px] text-slate-500 font-bold uppercase tracking-widest opacity-60">
+          <div className="flex items-center gap-6 text-sm text-slate-700 font-bold uppercase tracking-widest">
             <span className="flex items-center gap-2">
               <span className="material-symbols-outlined text-base">business</span>
               {company.sector}
@@ -42,7 +42,7 @@ const CompanyRow = ({ company, onEdit, onDelete }) => {
 
         {/* Health Score - Glass Integrated */}
         <div className="hidden lg:flex flex-col items-center px-10 border-x border-white/20">
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.3em] mb-2 opacity-60">Account Health</p>
+          <p className="text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Account Health</p>
           <div className="flex items-center gap-3">
             <span className={`text-3xl font-manrope font-black ${scoreStyle.text} tracking-tighter`}>{company.score}</span>
             <div className={cn("w-3 h-3 rounded-full animate-pulse", scoreStyle.bg)} />
@@ -53,7 +53,7 @@ const CompanyRow = ({ company, onEdit, onDelete }) => {
         <div className="flex items-center gap-6 pl-8">
           <div className="text-right hidden xl:block leading-tight">
             <p className="text-sm font-manrope font-black text-on-surface tracking-tight">{company.responsible}</p>
-            <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest opacity-60">
+            <p className="text-xs text-slate-700 uppercase font-black tracking-widest">
               {company.responsiblePosition}
             </p>
           </div>
@@ -149,14 +149,14 @@ export default function Companies() {
         actions={<Button icon="add" onClick={handleOpenCreate}>Adicionar Empresa</Button>}
       />
 
-      <div className="flex items-center gap-4 bg-white/70 backdrop-blur-2xl p-3 rounded-[2rem] border border-white/40 mb-10 shadow-[0_10px_40px_rgba(0,0,0,0.05)] ring-1 ring-emerald-500/10 transition-all duration-500 hover:shadow-lg">
+      <div className="flex items-center gap-4 bg-[linear-gradient(135deg,rgba(255,255,255,0.82),rgba(196,250,255,0.48),rgba(250,230,255,0.34))] backdrop-blur-2xl p-3 rounded-[2rem] border border-white/60 mb-10 shadow-[0_18px_45px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/5 transition-all duration-500 hover:shadow-lg">
         <SearchBar
           placeholder="Buscar no portfólio estratégico..."
           value={query}
           onChange={setQuery}
           className="bg-transparent border-0 shadow-none focus-within:ring-0"
         />
-        <button className="w-12 h-12 rounded-2xl border border-white/60 bg-white/50 hover:bg-white text-slate-400 hover:text-primary transition-all flex items-center justify-center shadow-sm active:scale-95">
+        <button className="w-12 h-12 rounded-2xl border border-slate-300 bg-white/80 hover:bg-white text-slate-700 hover:text-primary transition-all flex items-center justify-center shadow-sm active:scale-95">
           <span className="material-symbols-outlined">filter_list</span>
         </button>
       </div>

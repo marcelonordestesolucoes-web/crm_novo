@@ -49,6 +49,14 @@ function buildHeuristicAnalysis(conversationContent: string) {
   };
 }
 
+function normalizeProbability(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+
+  const asPercent = numeric > 0 && numeric <= 1 ? numeric * 100 : numeric;
+  return Math.max(0, Math.min(100, Math.round(asPercent)));
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -60,21 +68,38 @@ serve(async (req) => {
     const openAiKey = Deno.env.get("OPENAI_API_KEY");
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { deal_id } = await req.json();
-    if (!deal_id) throw new Error("deal_id is required");
+    const { deal_id, conversation_id } = await req.json();
+    if (!deal_id && !conversation_id) throw new Error("deal_id or conversation_id is required");
 
-    console.log(`[Oracle] Inicio da analise para Deal: ${deal_id}`);
+    console.log(`[Oracle] Inicio da analise para Deal: ${deal_id || "via-conversation"}`);
+
+    let resolvedDealId = deal_id;
+
+    if (!resolvedDealId && conversation_id) {
+      const { data: conversation, error: conversationError } = await supabase
+        .from("deal_conversations")
+        .select("deal_id")
+        .eq("id", conversation_id)
+        .maybeSingle();
+
+      if (conversationError) throw conversationError;
+      resolvedDealId = conversation?.deal_id;
+    }
+
+    if (!resolvedDealId) {
+      throw new Error("Adicione este atendimento ao pipeline antes de rodar a analise Oracle.");
+    }
 
     const { data: deal } = await supabase
       .from("deals")
       .select("title, value, stage, status, qualification")
-      .eq("id", deal_id)
+      .eq("id", resolvedDealId)
       .maybeSingle();
 
     const { data: messages } = await supabase
       .from("deal_conversations")
       .select("content, sender_type, created_at")
-      .eq("deal_id", deal_id)
+      .eq("deal_id", resolvedDealId)
       .order("created_at", { ascending: true })
       .limit(30);
 
@@ -134,22 +159,40 @@ Regras:
       aiAnalysis = buildHeuristicAnalysis(conversationContent);
     }
 
+    const closingProbability = normalizeProbability(aiAnalysis.closing_probability);
+    aiAnalysis.closing_probability = closingProbability;
+
     const { error: updateError } = await supabase
       .from("deals")
       .update({
-        ai_closing_probability: aiAnalysis.closing_probability,
+        ai_closing_probability: closingProbability,
         ai_temperature: aiAnalysis.temperature,
         ai_objection_pattern: aiAnalysis.objection_pattern,
         ai_next_step_timing: aiAnalysis.next_step_timing,
-        ai_priority_score: Math.round((aiAnalysis.closing_probability || 0) * 0.8),
+        ai_priority_score: Math.round(closingProbability * 0.8),
         ai_global_analysis: aiAnalysis,
         ai_last_analysis_at: new Date().toISOString(),
       })
-      .eq("id", deal_id);
+      .eq("id", resolvedDealId);
 
     if (updateError) throw updateError;
 
-    return new Response(JSON.stringify({ analysis: aiAnalysis, deal_id }), {
+    if (conversation_id) {
+      const { error: conversationUpdateError } = await supabase
+        .from("deal_conversations")
+        .update({
+          metadata: {
+            ai_analysis: aiAnalysis,
+          },
+        })
+        .eq("id", conversation_id);
+
+      if (conversationUpdateError) {
+        console.warn("[Oracle] Falha ao salvar analise na mensagem:", conversationUpdateError.message);
+      }
+    }
+
+    return new Response(JSON.stringify({ analysis: aiAnalysis, deal_id: resolvedDealId }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200,
     });

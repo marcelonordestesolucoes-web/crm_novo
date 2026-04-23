@@ -42,15 +42,15 @@ const TaskItem = ({ task, onToggle, onEdit }) => {
           >
             {task.title}
           </h3>
-          <Badge className={cn("px-3 py-1 rounded-full text-[9px] uppercase font-black tracking-widest border border-white/40", priority.badgeClass)} label={priority.label} />
+          <Badge className={cn("px-3 py-1.5 rounded-full text-xs uppercase font-black tracking-widest border border-white/40", priority.badgeClass)} label={priority.label} />
         </div>
         <div className="flex items-center gap-6">
-          <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 opacity-60">
+          <span className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-700">
             <span className="material-symbols-outlined text-sm">event</span>
             {task.dueDate} {task.dueTime ? `• ${task.dueTime}` : ''}
           </span>
           {task.dealTitle && (
-             <span className="flex items-center gap-2 text-primary font-black uppercase tracking-widest text-[9px] bg-primary/10 px-3 py-1 rounded-lg border border-primary/10">
+             <span className="flex items-center gap-2 text-primary font-black uppercase tracking-widest text-xs bg-primary/10 px-3 py-1.5 rounded-lg border border-primary/10">
                <span className="material-symbols-outlined text-sm">handshake</span>
                {task.dealTitle}
              </span>
@@ -87,7 +87,7 @@ const TaskStats = ({ tasks }) => {
       <Card className="p-8 bg-gradient-to-br from-primary to-primary-container border-0 shadow-xl shadow-primary/20 relative overflow-hidden group">
         <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 group-hover:scale-110 transition-transform duration-700" />
         <div className="relative z-10">
-          <p className="text-white/60 text-[10px] font-black uppercase tracking-[0.2em] mb-2">Produtividade Geral</p>
+          <p className="text-white/85 text-xs font-black uppercase tracking-widest mb-2">Produtividade Geral</p>
           <h4 className="text-4xl font-manrope font-black text-white mb-6">{percentage}%</h4>
           <div className="h-2 bg-white/20 rounded-full overflow-hidden mb-4">
             <motion.div 
@@ -112,7 +112,7 @@ const TaskStats = ({ tasks }) => {
                 <span className={cn("material-symbols-outlined text-2xl font-black", s.color)}>{s.icon}</span>
               </div>
               <div>
-                <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mb-1 opacity-60">{s.label}</p>
+                <p className="text-slate-700 text-xs font-black uppercase tracking-widest mb-1">{s.label}</p>
                 <p className="text-2xl font-manrope font-black text-on-surface tracking-tighter">{s.value}</p>
               </div>
             </div>
@@ -122,7 +122,7 @@ const TaskStats = ({ tasks }) => {
 
       <div className="p-10 rounded-[2.5rem] bg-white/20 backdrop-blur-md border border-white/40 border-dashed text-center">
         <span className="material-symbols-outlined text-primary/40 text-5xl mb-4">insights</span>
-        <p className="text-[10px] font-black text-slate-400 leading-relaxed uppercase tracking-[0.2em] opacity-60">Métricas baseadas no desempenho da sua organização.</p>
+        <p className="text-xs font-black text-slate-700 leading-relaxed uppercase tracking-widest">Métricas baseadas no desempenho da sua organização.</p>
       </div>
     </div>
   );

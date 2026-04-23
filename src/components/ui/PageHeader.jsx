@@ -10,13 +10,13 @@ import React from 'react';
 
 export const PageHeader = ({ title, subtitle, actions }) => {
   return (
-    <div className="flex justify-between items-end mb-10">
+    <div className="flex flex-col lg:flex-row lg:justify-between lg:items-end gap-5 mb-10">
       <div>
-        <h2 className="text-3xl font-manrope font-extrabold text-on-surface tracking-tight">
+        <h2 className="text-4xl font-manrope font-black text-slate-950 tracking-tight">
           {title}
         </h2>
         {subtitle && (
-          <p className="text-on-surface-variant font-inter mt-1 text-sm">
+          <p className="text-slate-700 font-inter mt-2 text-base font-semibold leading-relaxed">
             {subtitle}
           </p>
         )}

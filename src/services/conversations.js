@@ -28,19 +28,9 @@ export async function getConversationsByContext({ dealId, phone, chatId, contact
   let query = supabase.from('deal_conversations').select('*').eq('org_id', orgId);
   
   // Construção da query OR agressiva (suporta ID de negócio, telefone ou o novo chat_id)
-  const hasThreadIdentity = Boolean(
-    chatId ||
-    cleanPhone ||
-    phone ||
-    aliases.some(alias => {
-      const type = String(alias).split(':')[0];
-      return type === 'chat' || type === 'phone';
-    })
-  );
-
   const orConditions = [];
-  if (dealId && !hasThreadIdentity) orConditions.push(`deal_id.eq.${dealId}`);
-  if (contactId && !hasThreadIdentity) orConditions.push(`contact_id.eq.${contactId}`);
+  if (dealId) orConditions.push(`deal_id.eq.${dealId}`);
+  if (contactId) orConditions.push(`contact_id.eq.${contactId}`);
   if (cleanPhone) orConditions.push(`sender_phone.eq.${cleanPhone}`);
   if (phone) orConditions.push(`sender_phone.eq.${phone}`);
   if (chatId) orConditions.push(`chat_id.eq.${chatId}`);
@@ -50,7 +40,7 @@ export async function getConversationsByContext({ dealId, phone, chatId, contact
     const value = valueParts.join(':');
     if (!value) return;
 
-    if (type === 'contact' && !hasThreadIdentity) orConditions.push(`contact_id.eq.${value}`);
+    if (type === 'contact') orConditions.push(`contact_id.eq.${value}`);
     if (type === 'phone') orConditions.push(`sender_phone.eq.${value}`);
     if (type === 'chat') orConditions.push(`chat_id.eq.${value}`);
   });
@@ -122,6 +112,7 @@ export async function createConversation(
        console.log('[Stitch] Resposta Z-API:', zapiResponse);
        externalId = zapiResponse?.zaapId || zapiResponse?.zaid || zapiResponse?.messageId || zapiResponse?.id;
      } catch (err) {
+       if (err?.message) throw new Error(err.message);
        console.error('[Stitch] Falha no disparo real. Cancelando persistência:', err);
        throw new Error('Falha ao enviar mensagem pelo WhatsApp. Verifique sua conexão/instância.');
      }
@@ -141,7 +132,11 @@ export async function createConversation(
         external_message_id: externalId,
         media_url: mediaUrl,
         message_type: messageType,
-        metadata: {}
+        metadata: {
+          outbound_recipient: recipientPhone,
+          outbound_chat_id: normalizedChatId,
+          outbound_sender_phone: senderPhone
+        }
       }
     ])
     .select()
