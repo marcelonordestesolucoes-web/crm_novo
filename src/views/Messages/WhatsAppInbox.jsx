@@ -875,36 +875,36 @@ export default function WhatsAppInbox() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-start mb-1">
-                    <h4 className="font-black text-slate-950 truncate text-base">{chat.contact_name}</h4>
-                    <span className="text-xs text-slate-600 font-bold whitespace-nowrap">
+                    <h4 className="font-black text-slate-950 truncate text-lg">{chat.contact_name}</h4>
+                    <span className="text-sm text-slate-700 font-bold whitespace-nowrap">
                       {chat.last_message_at ? formatRelative(new Date(chat.last_message_at), new Date(), { locale: ptBR }) : ''}
                     </span>
                   </div>
                   <p className={cn(
-                    "text-sm truncate transition-colors font-semibold",
+                    "text-base truncate transition-colors font-semibold",
                     chat.sender_type === 'user' ? "text-slate-600" : "text-slate-700"
                   )}>
                     {chat.sender_type === 'user' && 'VocÃª: '}
                     {chat.last_message}
                   </p>
                   <div className="mt-2 flex items-center gap-2">
-                      <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">
+                      <span className="text-[11px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full bg-slate-100 text-slate-700">
                         {chat.deal_title}
                       </span>
                       {chat.is_group && (
-                         <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">
+                         <span className="text-[11px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full bg-blue-100 text-blue-700">
                            Grupo
                          </span>
                       )}
                       {!chat.is_qualified ? (
                         <span className={cn(
-                          "text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full",
+                          "text-[11px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full",
                           chat.contact_is_auto ? "bg-amber-100 text-amber-600 animate-pulse" : "bg-slate-200 text-slate-600"
                         )}>
                           {chat.contact_is_auto ? 'Novo Lead' : 'NÃ£o Qualificado'}
                         </span>
                       ) : (
-                        <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-primary/10 text-primary">
+                        <span className="text-[11px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full bg-primary/10 text-primary">
                           {chat.stage_label}
                         </span>
                       )}
@@ -934,7 +934,7 @@ export default function WhatsAppInbox() {
                   <h3 className="font-black text-slate-950 tracking-tight text-lg">{activeChat.contact_name}</h3>
                   <div className="flex items-center gap-2">
                      <div className={cn("w-2 h-2 rounded-full animate-pulse", activeChat.is_group ? "bg-primary" : "bg-emerald-500")} />
-                     <p className="text-xs text-slate-700 font-black uppercase tracking-widest flex items-center gap-2">
+                     <p className="text-sm text-slate-700 font-black uppercase tracking-widest flex items-center gap-2">
                         {activeChat.is_group ? 'Grupo WhatsApp' : 'WhatsApp Online'}
                         {!activeChat.is_qualified ? (
                           <span className={cn("ml-2 font-black", activeChat.contact_is_auto ? "text-amber-600" : "text-slate-700")}>
@@ -1056,7 +1056,7 @@ export default function WhatsAppInbox() {
               className="flex-1 overflow-y-auto p-10 space-y-6 custom-scrollbar scroll-smooth bg-[linear-gradient(180deg,rgba(255,255,255,0.20),rgba(240,249,255,0.18),rgba(250,245,255,0.18))]"
             >
               <div className="flex flex-col items-center py-8">
-                 <span className="px-5 py-2 rounded-full bg-white/90 text-xs font-black text-slate-700 uppercase tracking-widest shadow-sm mb-4 border border-white/70">
+                 <span className="px-5 py-2 rounded-full bg-white/90 text-sm font-black text-slate-700 uppercase tracking-widest shadow-sm mb-4 border border-white/70">
                    InÃ­cio da Conversa â€” {activeChat.deal_title}
                  </span>
               </div>
@@ -1157,7 +1157,7 @@ export default function WhatsAppInbox() {
                       )}
 
                       <div className={cn(
-                        "px-6 py-4 rounded-[2rem] text-base shadow-md transition-all border leading-relaxed",
+                        "px-7 py-5 rounded-[2rem] text-lg font-semibold shadow-md transition-all border leading-relaxed",
                         isMe 
                           ? "bg-primary text-white border-primary/20 rounded-tr-sm shadow-primary/20" 
                           : "bg-white/95 text-slate-800 border-white/80 rounded-tl-sm hover:shadow-lg",
@@ -1188,7 +1188,7 @@ export default function WhatsAppInbox() {
                               <Mic className="w-5 h-5" />
                             </div>
                             <div className="flex-1">
-                               <p className={cn("text-[8px] font-black uppercase tracking-widest mb-1", isMe ? "text-white/60" : "text-slate-400")}>Mensagem de Voz</p>
+                               <p className={cn("text-xs font-black uppercase tracking-widest mb-1", isMe ? "text-white/70" : "text-slate-600")}>Mensagem de Voz</p>
                                <audio src={msg.media_url} controls className={cn("h-8 w-full", isMe && "invert")} />
                             </div>
                           </div>
@@ -1214,8 +1214,8 @@ export default function WhatsAppInbox() {
                               <FileText className="w-6 h-6" />
                             </div>
                             <div className="flex-1 min-w-0">
-                               <p className={cn("text-[9px] font-black uppercase tracking-widest", isMe ? "text-white/60" : "text-slate-400")}>Documento</p>
-                               <p className={cn("text-xs font-bold truncate", isMe ? "text-white" : "text-slate-700")}>Ver arquivo anexo</p>
+                               <p className={cn("text-xs font-black uppercase tracking-widest", isMe ? "text-white/70" : "text-slate-600")}>Documento</p>
+                               <p className={cn("text-sm font-bold truncate", isMe ? "text-white" : "text-slate-800")}>Ver arquivo anexo</p>
                             </div>
                             <Download className="w-4 h-4 opacity-40 shrink-0" />
                           </a>
@@ -1223,14 +1223,14 @@ export default function WhatsAppInbox() {
 
                         <div className={cn(
                           "leading-relaxed",
-                          msg.message_type !== 'text' && "mt-3 pt-3 border-t font-medium text-[13px]",
-                          msg.message_type !== 'text' && (isMe ? "border-white/10 text-white/90 italic" : "border-slate-100 text-slate-500 italic")
+                          msg.message_type !== 'text' && "mt-3 pt-3 border-t font-semibold text-base",
+                          msg.message_type !== 'text' && (isMe ? "border-white/10 text-white/95 italic" : "border-slate-100 text-slate-700 italic")
                         )}>
                           {msg.content}
                         </div>
                       </div>
 
-                      <span className="text-xs text-slate-600 mt-2 font-black uppercase tracking-widest px-4">
+                      <span className="text-[11px] text-slate-600 mt-2 font-black uppercase tracking-[0.12em] px-4">
                         {isMe ? 'VocÃª' : 'Cliente'} â€¢ {msg.created_at ? formatRelative(new Date(msg.created_at), new Date(), { locale: ptBR }) : 'Agora'}
                       </span>
                     </div>
@@ -1339,7 +1339,7 @@ export default function WhatsAppInbox() {
                         }
                       }}
                       placeholder="Escreva sua resposta..."
-                      className="flex-1 bg-transparent py-4 text-base focus:outline-none text-slate-900 placeholder:text-slate-500 font-semibold"
+                      className="flex-1 bg-transparent py-4 text-lg focus:outline-none text-slate-900 placeholder:text-slate-500 font-semibold"
                     />
 
                     {/* BotÃ£o de Gravar Ãudio */}
