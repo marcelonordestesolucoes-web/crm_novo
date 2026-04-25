@@ -96,6 +96,9 @@ export async function createConversation(
   const normalizedChatId = options.chatId || phone;
   const recipientPhone = options.recipientPhone || phone;
   const senderPhone = options.senderPhone || recipientPhone || phone;
+  const replyToMessageId = options.replyToMessageId || options.quotedMessageId || null;
+  const replyToContent = options.replyToContent || null;
+  const replyToSender = options.replyToSender || null;
 
   if (source === 'whatsapp' && senderType === 'sales' && recipientPhone) {
      // A âncora agora é o ID completo que já vem do Inbox (v22: Sem sufixos manuais)
@@ -106,7 +109,7 @@ export async function createConversation(
        if (mediaUrl) {
          zapiResponse = await sendWhatsAppMedia(recipientPhone, mediaUrl, messageType, content);
        } else {
-         zapiResponse = await sendWhatsAppMessage(recipientPhone, content);
+         zapiResponse = await sendWhatsAppMessage(recipientPhone, content, replyToMessageId);
        }
        
        console.log('[Stitch] Resposta Z-API:', zapiResponse);
@@ -135,7 +138,10 @@ export async function createConversation(
         metadata: {
           outbound_recipient: recipientPhone,
           outbound_chat_id: normalizedChatId,
-          outbound_sender_phone: senderPhone
+          outbound_sender_phone: senderPhone,
+          reply_to_message_id: replyToMessageId,
+          reply_to_content: replyToContent,
+          reply_to_sender: replyToSender
         }
       }
     ])

@@ -9,6 +9,8 @@ import Tasks      from '@/views/Tasks/Tasks';
 import Analytics  from '@/views/Analytics/Analytics';
 import SettingsView from '@/views/Settings/SettingsView';
 import CampaignsView from '@/views/Campaigns/CampaignsView';
+import FlowsView from '@/views/Flows/FlowsView';
+import FlowBuilderView from '@/views/Flows/FlowBuilderView';
 import Login      from '@/views/Auth/Login';
 import UpdatePassword from '@/views/Auth/UpdatePassword';
 import WhatsAppInbox from '@/views/Messages/WhatsAppInbox';
@@ -37,6 +39,9 @@ function App() {
                   <Route path={ROUTES.CONTATOS}  element={<Contacts />} />
                   <Route path={ROUTES.TAREFAS}   element={<Tasks />} />
                   <Route path={ROUTES.CAMPANHAS} element={<CampaignsView />} />
+                  <Route path={ROUTES.FLUXOS} element={<FlowsView />} />
+                  <Route path={`${ROUTES.FLUXOS}/novo`} element={<FlowBuilderView />} />
+                  <Route path={`${ROUTES.FLUXOS}/:flowId`} element={<FlowBuilderView />} />
                   <Route path={ROUTES.ANALYTICS} element={<Analytics />} />
                   <Route path={ROUTES.CONFIGURACOES} element={<SettingsView />} />
                   <Route path="*"                element={<Navigate to={ROUTES.HOME} replace />} />

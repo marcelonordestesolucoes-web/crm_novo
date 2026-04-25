@@ -20,6 +20,7 @@ function buildPayload(body: Record<string, unknown>) {
   const type = String(body.type || "text");
   const phone = normalizeRecipientPhone(body.phone);
   const message = String(body.message || "");
+  const messageId = String(body.messageId || "");
   const mediaUrl = String(body.mediaUrl || "");
   const caption = String(body.caption || "");
 
@@ -27,7 +28,14 @@ function buildPayload(body: Record<string, unknown>) {
 
   if (type === "text") {
     if (!message.trim()) throw new Error("Mensagem obrigatória.");
-    return { endpoint: endpointByType.text, payload: { phone, message } };
+    return {
+      endpoint: endpointByType.text,
+      payload: {
+        phone,
+        message,
+        ...(messageId ? { messageId } : {}),
+      },
+    };
   }
 
   const endpoint = endpointByType[type] || endpointByType.document;

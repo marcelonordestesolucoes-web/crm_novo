@@ -28,6 +28,7 @@ export const NAV_ITEMS = [
   { id: 'contatos',  label: 'Contatos',  icon: 'contacts',   path: '/contatos' },
   { id: 'tarefas',   label: 'Tarefas',   icon: 'task_alt',   path: '/tarefas' },
   { id: 'campanhas', label: 'Campanhas', icon: 'campaign',   path: '/campanhas' },
+  { id: 'fluxos',    label: 'Fluxos',    icon: 'account_tree', path: '/fluxos' },
   { id: 'analytics', label: 'Analytics', icon: 'monitoring', path: '/analytics' },
 ];
 
@@ -103,6 +104,7 @@ export const ROUTES = {
   CONTATOS:  '/contatos',
   TAREFAS:   '/tarefas',
   CAMPANHAS: '/campanhas',
+  FLUXOS:    '/fluxos',
   ANALYTICS: '/analytics',
   CONFIGURACOES: '/configuracoes',
 };

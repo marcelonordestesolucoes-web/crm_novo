@@ -164,11 +164,22 @@ async function fetchZapiContactMetadata(identifiers: string[]) {
 }
 
 function getMediaInfo(body: Record<string, any>) {
-  let type = body.type || body.data?.type || "text";
+  let type = "text";
   let url = body.mediaUrl || body.data?.mediaUrl || null;
   let caption = "";
 
-  if (body.image || body.data?.image) {
+  if (body.reaction || body.data?.reaction || body.reactionMessage || body.data?.reactionMessage) {
+    type = "reaction";
+  } else if (body.notification || body.data?.notification) {
+    type = "notification";
+  } else if (body.pollVote || body.data?.pollVote) {
+    type = "poll";
+  } else if (body.buttonsResponseMessage || body.data?.buttonsResponseMessage ||
+    body.listResponseMessage || body.data?.listResponseMessage ||
+    body.buttonReply || body.data?.buttonReply ||
+    body.templateButtonReplyMessage || body.data?.templateButtonReplyMessage) {
+    type = "text";
+  } else if (body.image || body.data?.image) {
     const image = body.image || body.data.image;
     type = "image";
     url = image.imageUrl || image.url || url;
@@ -199,13 +210,197 @@ function getMediaInfo(body: Record<string, any>) {
   return { type, url, caption };
 }
 
-function getText(body: Record<string, any>, media: { type: string; url: string | null; caption: string }) {
-  const msg = body.text?.message || body.data?.text?.message ||
-    body.text || body.data?.text || body.conversation ||
-    body.message?.conversation || body.extendedTextMessage?.text ||
-    media.caption;
+function getReactionInfo(body: Record<string, any>) {
+  const reaction = body.reaction || body.data?.reaction || body.reactionMessage || body.data?.reactionMessage;
+  if (!reaction || typeof reaction !== "object") return null;
 
-  return msg ? String(msg) : (media.url ? `[Midia: ${media.type}]` : "[Mensagem sem texto]");
+  const referencedMessage = reaction.referencedMessage || reaction.key || reaction.message || {};
+  const emoji = firstTextCandidate(
+    reaction.value,
+    reaction.emoji,
+    reaction.text,
+    reaction.reaction,
+    reaction.body,
+  );
+  const referencedMessageId = firstTextCandidate(
+    reaction.messageId,
+    reaction.referencedMessageId,
+    referencedMessage.messageId,
+    referencedMessage.id,
+  );
+
+  return { emoji, referencedMessageId };
+}
+
+function getQuotedMessageInfo(body: Record<string, any>) {
+  const quoted = body.quotedMessage || body.data?.quotedMessage ||
+    body.referencedMessage || body.data?.referencedMessage ||
+    body.contextInfo?.quotedMessage || body.data?.contextInfo?.quotedMessage ||
+    body.message?.extendedTextMessage?.contextInfo?.quotedMessage ||
+    body.data?.message?.extendedTextMessage?.contextInfo?.quotedMessage ||
+    body.message?.contextInfo?.quotedMessage ||
+    body.data?.message?.contextInfo?.quotedMessage ||
+    null;
+
+  const contextInfo = body.contextInfo || body.data?.contextInfo ||
+    body.message?.extendedTextMessage?.contextInfo ||
+    body.data?.message?.extendedTextMessage?.contextInfo ||
+    body.message?.contextInfo ||
+    body.data?.message?.contextInfo ||
+    {};
+
+  const messageId = firstTextCandidate(
+    body.referenceMessageId,
+    body.data?.referenceMessageId,
+    body.referencedMessageId,
+    body.data?.referencedMessageId,
+    body.quotedMessageId,
+    body.data?.quotedMessageId,
+    contextInfo.stanzaId,
+    contextInfo.messageId,
+    quoted?.messageId,
+    quoted?.id,
+  );
+
+  const quotedText = firstTextCandidate(
+    quoted?.text?.message,
+    quoted?.text,
+    quoted?.conversation,
+    quoted?.extendedTextMessage?.text,
+    quoted?.imageMessage?.caption,
+    quoted?.videoMessage?.caption,
+    quoted?.documentMessage?.caption,
+    quoted?.message,
+    quoted?.body,
+    quoted?.caption,
+  ) || collectStructuredText(quoted).join("\n").trim();
+
+  const participant = firstTextCandidate(
+    body.quotedParticipant,
+    body.data?.quotedParticipant,
+    contextInfo.participant,
+    contextInfo.remoteJid,
+  );
+
+  if (!messageId && !quotedText) return null;
+  return { messageId, quotedText: quotedText || null, participant };
+}
+
+function cleanTextCandidate(value: unknown) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string" && typeof value !== "number") return null;
+
+  const text = String(value).trim();
+  return text ? text : null;
+}
+
+function firstTextCandidate(...values: unknown[]) {
+  for (const value of values) {
+    const text = cleanTextCandidate(value);
+    if (text) return text;
+  }
+
+  return null;
+}
+
+function collectStructuredText(value: unknown, seen = new Set<unknown>()): string[] {
+  if (!value || typeof value !== "object" || seen.has(value)) return [];
+  seen.add(value);
+
+  const record = value as Record<string, any>;
+  const direct = firstTextCandidate(
+    record.message,
+    record.text,
+    record.body,
+    record.caption,
+    record.content,
+    record.contentText,
+    record.title,
+    record.description,
+    record.selectedDisplayText,
+    record.displayText,
+    record.selectedRowId,
+    record.fileName,
+    record.emoji,
+    record.reaction,
+    record.value,
+  );
+
+  const parts = direct ? [direct] : [];
+  for (const key of [
+    "header",
+    "footer",
+    "buttonReply",
+    "buttonsResponseMessage",
+    "templateButtonReplyMessage",
+    "listResponseMessage",
+    "interactive",
+    "hydratedTemplate",
+    "templateMessage",
+    "reactionMessage",
+    "quotedMessage",
+    "referencedMessage",
+    "contextInfo",
+  ]) {
+    parts.push(...collectStructuredText(record[key], seen));
+  }
+
+  return [...new Set(parts)];
+}
+
+function getText(body: Record<string, any>, media: { type: string; url: string | null; caption: string }) {
+  const reaction = getReactionInfo(body);
+  if (reaction) {
+    return reaction.emoji ? `Reagiu com ${reaction.emoji}` : "Reagiu a uma mensagem";
+  }
+
+  const msg = firstTextCandidate(
+    body.text?.message,
+    body.data?.text?.message,
+    body.text,
+    body.data?.text,
+    body.conversation,
+    body.data?.conversation,
+    body.message?.conversation,
+    body.data?.message?.conversation,
+    body.extendedTextMessage?.text,
+    body.data?.extendedTextMessage?.text,
+    body.message?.extendedTextMessage?.text,
+    body.data?.message?.extendedTextMessage?.text,
+    body.message?.imageMessage?.caption,
+    body.data?.message?.imageMessage?.caption,
+    body.message?.videoMessage?.caption,
+    body.data?.message?.videoMessage?.caption,
+    body.message?.documentMessage?.caption,
+    body.data?.message?.documentMessage?.caption,
+    media.caption,
+  );
+
+  if (msg) return msg;
+
+  const structuredParts = [
+    ...collectStructuredText(body.message),
+    ...collectStructuredText(body.data?.message),
+    ...collectStructuredText(body.buttonReply),
+    ...collectStructuredText(body.data?.buttonReply),
+    ...collectStructuredText(body.buttonsResponseMessage),
+    ...collectStructuredText(body.data?.buttonsResponseMessage),
+    ...collectStructuredText(body.templateButtonReplyMessage),
+    ...collectStructuredText(body.data?.templateButtonReplyMessage),
+    ...collectStructuredText(body.listResponseMessage),
+    ...collectStructuredText(body.data?.listResponseMessage),
+    ...collectStructuredText(body.interactive),
+    ...collectStructuredText(body.data?.interactive),
+    ...collectStructuredText(body.reaction),
+    ...collectStructuredText(body.data?.reaction),
+    ...collectStructuredText(body.reactionMessage),
+    ...collectStructuredText(body.data?.reactionMessage),
+  ].filter((part) => part !== media.caption);
+
+  const structuredText = [...new Set(structuredParts)].join("\n").trim();
+  if (structuredText) return structuredText;
+
+  return media.url ? `[Midia: ${media.type}]` : "[Mensagem sem texto]";
 }
 
 function isSentByMe(body: Record<string, any>) {
@@ -213,6 +408,25 @@ function isSentByMe(body: Record<string, any>) {
     body.data?.fromMe ?? body.data?.sentByMe ?? body.data?.isFromMe;
 
   return value === true || value === "true" || value === 1 || value === "1";
+}
+
+function isEditEvent(body: Record<string, any>) {
+  const value = body.isEdit ?? body.data?.isEdit ?? body.edited ?? body.data?.edited;
+  return value === true || value === "true" || value === 1 || value === "1";
+}
+
+function getEditTargetMessageId(body: Record<string, any>, fallbackMessageId: string) {
+  return firstTextCandidate(
+    body.referenceMessageId,
+    body.data?.referenceMessageId,
+    body.originalMessageId,
+    body.data?.originalMessageId,
+    body.editedMessageId,
+    body.data?.editedMessageId,
+    body.messageId,
+    body.data?.messageId,
+    fallbackMessageId,
+  );
 }
 
 serve(async (req) => {
@@ -351,15 +565,103 @@ serve(async (req) => {
     const media = getMediaInfo(body);
     const externalId = body.messageId || body.data?.messageId || `${chatId}-${Date.now()}`;
     const sentByMe = isSentByMe(body);
-    const content = getText(body, media).substring(0, 2000);
+    const isEdit = isEditEvent(body);
+    const reaction = getReactionInfo(body);
+    const quotedInfo = getQuotedMessageInfo(body);
+    let quotedContent = quotedInfo?.quotedText || null;
+    let content = getText(body, media);
 
-    if (sentByMe) {
+    if (reaction?.referencedMessageId) {
+      const { data: referenced } = await supabase
+        .from("deal_conversations")
+        .select("content")
+        .eq("org_id", org.id)
+        .eq("external_message_id", reaction.referencedMessageId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (referenced?.content && !referenced.content.startsWith("[Mensagem sem texto]")) {
+        const quoted = String(referenced.content).replace(/\s+/g, " ").trim().slice(0, 140);
+        content = `${content} a: "${quoted}"`;
+      }
+    }
+
+    if (quotedInfo?.messageId && !quotedContent) {
+      const { data: quoted } = await supabase
+        .from("deal_conversations")
+        .select("content")
+        .eq("org_id", org.id)
+        .eq("external_message_id", quotedInfo.messageId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      quotedContent = quoted?.content || null;
+    }
+
+    if (content === "[Mensagem sem texto]" && (quotedInfo?.messageId || quotedContent)) {
+      const quotedPreview = quotedContent ? `: "${String(quotedContent).replace(/\s+/g, " ").trim().slice(0, 140)}"` : "";
+      content = `Resposta a uma mensagem${quotedPreview}`;
+    }
+
+    content = content.substring(0, 2000);
+
+    if (isEdit) {
+      const targetMessageId = getEditTargetMessageId(body, externalId);
+      const idsToTry = [...new Set([targetMessageId, externalId].filter(Boolean))];
+
+      for (const targetId of idsToTry) {
+        const { data: existingEdited } = await supabase
+          .from("deal_conversations")
+          .select("id, content, metadata")
+          .eq("org_id", org.id)
+          .eq("external_message_id", targetId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!existingEdited?.id) continue;
+
+        const existingMetadata = existingEdited.metadata && typeof existingEdited.metadata === "object"
+          ? existingEdited.metadata
+          : {};
+
+        const { error: updateError } = await supabase
+          .from("deal_conversations")
+          .update({
+            content,
+            message_type: media.type,
+            media_url: media.url,
+            metadata: {
+              ...existingMetadata,
+              is_edited: true,
+              edited_at: new Date().toISOString(),
+              edit_event_message_id: externalId,
+              original_content: existingMetadata.original_content || existingEdited.content,
+              raw_type: body.type ?? body.data?.type ?? existingMetadata.raw_type ?? null,
+              payload_keys: Object.keys(body || {}),
+              data_keys: Object.keys(body?.data || {}),
+            },
+          })
+          .eq("id", existingEdited.id);
+
+        if (updateError) throw updateError;
+
+        return new Response(JSON.stringify({ ok: true, edited: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    if (sentByMe && media.type === "text") {
       const { data: existingOutbound } = await supabase
         .from("deal_conversations")
         .select("id")
         .eq("org_id", org.id)
         .eq("chat_id", chatId)
         .eq("sender_type", "sales")
+        .eq("message_type", "text")
         .eq("content", content)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -391,7 +693,17 @@ serve(async (req) => {
       sender_name: isGroup ? finalDisplayName : senderName,
       message_type: media.type,
       media_url: media.url,
-      metadata: isGroup ? { participant_name: senderName } : {},
+      metadata: {
+        ...(isGroup ? { participant_name: senderName } : {}),
+        raw_type: body.type ?? body.data?.type ?? null,
+        reaction_value: reaction?.emoji ?? null,
+        reaction_reference_message_id: reaction?.referencedMessageId ?? null,
+        reply_to_message_id: quotedInfo?.messageId ?? null,
+        reply_to_content: quotedContent ? String(quotedContent).replace(/\s+/g, " ").trim().slice(0, 500) : null,
+        reply_to_sender: quotedInfo?.participant ?? null,
+        payload_keys: Object.keys(body || {}),
+        data_keys: Object.keys(body?.data || {}),
+      },
     });
 
     if (error) throw error;

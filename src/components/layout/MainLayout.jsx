@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { TopBar } from '@/components/layout/TopBar';
 import { Modal } from '@/components/ui';
 import { ProfileTab } from '@/views/Settings/tabs/ProfileTab';
 import { useMouseGlow } from "@/hooks/useMouseGlow";
+import { ROUTES } from '@/constants/config';
 
 export const MainLayout = ({ children }) => {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const mouse = useMouseGlow();
+  const location = useLocation();
+  const isFlowsRoute = location.pathname.startsWith(ROUTES.FLUXOS);
 
   return (
     <div className="min-h-screen flex text-on-surface relative overflow-hidden">
@@ -41,8 +45,12 @@ export const MainLayout = ({ children }) => {
         <TopBar onOpenProfile={() => setShowProfileModal(true)} />
 
         <main className="flex-1 pt-[72px]">
-          <div className="px-8 pb-8 pt-0 md:px-10 md:pb-10 md:pt-0 max-w-[1600px] mx-auto w-full 
-            animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <div className={[
+            'w-full animate-in fade-in slide-in-from-bottom-4 duration-700',
+            isFlowsRoute
+              ? 'px-3 pb-4 pt-0 md:px-4 md:pb-5'
+              : 'max-w-[1600px] mx-auto px-8 pb-8 pt-0 md:px-10 md:pb-10'
+          ].join(' ')}>
             {children}
           </div>
         </main>

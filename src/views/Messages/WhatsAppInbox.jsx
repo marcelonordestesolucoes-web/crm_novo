@@ -1,7 +1,7 @@
 ﻿// src/views/Messages/WhatsAppInbox.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, MoreVertical, Send, Phone, User, Filter, ArrowLeft, Rocket, CheckCircle2, Users, Image as ImageIcon, Mic, FileText, Play, Download, Trash2, Paperclip, X } from 'lucide-react';
+import { Search, MoreVertical, Send, Phone, User, Filter, ArrowLeft, Rocket, CheckCircle2, Users, Image as ImageIcon, Mic, FileText, Play, Download, Trash2, Paperclip, X, Reply, Smile } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSupabase } from '@/hooks/useSupabase';
 import { getWhatsAppInbox, deleteChat } from '@/services/whatsapp';
@@ -14,6 +14,25 @@ import { DealForm } from '@/views/Funnel/DealForm';
 import { formatRelative } from 'date-fns';
 import { ptBR } from 'date-fns/locale/pt-BR';
 
+const EMOJI_CATEGORIES = [
+  {
+    label: 'Recentes',
+    emojis: ['👍', '🙏', '😂', '😍', '👏', '🔥', '✅', '🚀']
+  },
+  {
+    label: 'Smileys e pessoas',
+    emojis: ['😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇', '🙂', '😉', '😍', '😘', '😎', '🤩', '🥳', '😢', '😭', '😡', '😱', '🤔', '🤫', '🙌', '👏', '🤝', '🙏', '💪']
+  },
+  {
+    label: 'Trabalho',
+    emojis: ['✅', '☑️', '📌', '📎', '📄', '📊', '💼', '💰', '📈', '📉', '⏰', '📅', '☎️', '📞', '💬', '✉️', '🔔', '⭐', '🚀', '🔥']
+  },
+  {
+    label: 'Símbolos',
+    emojis: ['❤️', '💙', '💚', '💛', '🟢', '🔵', '🟡', '🔴', '⚠️', '❌', '❗', '❓', '➡️', '⬅️', '⬆️', '⬇️', '🔒', '🔓', '💡', '🎯']
+  }
+];
+
 /**
  * COMPONENTE: INBOX ELITE (CENTRAL DE COMANDO WHATSAPP)
  */
@@ -25,12 +44,19 @@ export default function WhatsAppInbox() {
   const [isSending, setIsSending] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef(null);
+  const messageInputRef = useRef(null);
   const [isQualifying, setIsQualifying] = useState(false);
   const [analyzingIds, setAnalyzingIds] = useState(new Set());
    const [isGlobalAnalyzing, setIsGlobalAnalyzing] = useState(false);
   const [showChatMenu, setShowChatMenu] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [defaultPipelineStageId, setDefaultPipelineStageId] = useState(null);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [showOracleModal, setShowOracleModal] = useState(false);
+  const [replyToMessage, setReplyToMessage] = useState(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [emojiSearch, setEmojiSearch] = useState('');
+  const pendingInitialScrollRef = useRef(false);
   
   // [AUDIO RECORDING v29] Estados para o Gravador de Voz
   const [isRecording, setIsRecording] = useState(false);
@@ -38,8 +64,12 @@ export default function WhatsAppInbox() {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const timerIntervalRef = useRef(null);
+  const sendQueueRef = useRef([]);
+  const isProcessingSendQueueRef = useRef(false);
+  const [sendQueueSize, setSendQueueSize] = useState(0);
   
   const { data: inbox, setData: setInbox, loading: loadingInbox, refetch: refetchInbox } = useSupabase(getWhatsAppInbox);
+  const latestMessageRef = useRef(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -73,6 +103,21 @@ export default function WhatsAppInbox() {
   }, [inbox]);
 
   const scrollRef = useRef(null);
+  const scrollToLatestMessage = React.useCallback((behavior = 'auto') => {
+    const run = () => {
+      if (latestMessageRef.current) {
+        latestMessageRef.current.scrollIntoView({ block: 'end', behavior });
+        return;
+      }
+
+      const container = scrollRef.current;
+      if (container) container.scrollTop = container.scrollHeight;
+    };
+
+    requestAnimationFrame(() => requestAnimationFrame(run));
+    window.setTimeout(run, 80);
+    window.setTimeout(run, 250);
+  }, []);
 
   // --- [DERIVED IDENTITIES] ---
   const activeChatId = activeChat?.id; // Usar a chave Ãºnica reconstruÃ­da (c-ID ou p-Phone)
@@ -228,9 +273,13 @@ export default function WhatsAppInbox() {
     messages.forEach((message) => {
       const existingIndex = unique.findIndex((item) => {
         if (item.id === message.id) return true;
+        if (item.external_message_id && message.external_message_id && item.external_message_id === message.external_message_id) return true;
         if (item.chat_id !== message.chat_id) return false;
         if (item.sender_type !== message.sender_type) return false;
-        if (item.content !== message.content) return false;
+        if (!item.is_optimistic && !message.is_optimistic) return false;
+        if ((item.message_type || 'text') !== (message.message_type || 'text')) return false;
+        if ((item.message_type || 'text') !== 'text' && item.media_url && message.media_url && item.media_url !== message.media_url) return false;
+        if (String(item.content || '').trim() !== String(message.content || '').trim()) return false;
 
         const itemTime = new Date(item.created_at).getTime();
         const messageTime = new Date(message.created_at).getTime();
@@ -273,39 +322,84 @@ export default function WhatsAppInbox() {
     });
   }, [activeChatId, activeChatPhone, activeThreadAliases]);
 
+  const getReplyPreview = React.useCallback((message) => {
+    if (!message) return null;
+    const content = String(message.content || '').replace(/\s+/g, ' ').trim();
+    return {
+      id: message.id,
+      externalId: message.external_message_id,
+      sender: message.sender_type === 'sales' ? 'Você' : (message.sender_name || 'Cliente'),
+      content: content || `[${message.message_type || 'mensagem'}]`
+    };
+  }, []);
+
+  const filteredEmojiCategories = React.useMemo(() => {
+    const query = emojiSearch.trim().toLowerCase();
+    if (!query) return EMOJI_CATEGORIES;
+
+    return EMOJI_CATEGORIES
+      .map(category => ({
+        ...category,
+        emojis: category.emojis.filter(emoji => emoji.includes(query))
+      }))
+      .filter(category => category.emojis.length);
+  }, [emojiSearch]);
+
+  const insertEmoji = React.useCallback((emoji) => {
+    const input = messageInputRef.current;
+    const start = input?.selectionStart ?? newMessage.length;
+    const end = input?.selectionEnd ?? newMessage.length;
+    const nextMessage = `${newMessage.slice(0, start)}${emoji}${newMessage.slice(end)}`;
+
+    setNewMessage(nextMessage);
+    requestAnimationFrame(() => {
+      messageInputRef.current?.focus();
+      const cursor = start + emoji.length;
+      messageInputRef.current?.setSelectionRange(cursor, cursor);
+    });
+  }, [newMessage]);
+
   // 1. Ouvir mudanÃ§as globais para atualizar a lista do Inbox
   useEffect(() => {
+    const applyInboxMessage = (newMsg) => {
+      setInbox(prev => {
+        if (!prev) return prev;
+
+        const chatIdx = prev.findIndex(chat =>
+          chat.id === newMsg.chat_id ||
+          (newMsg.contact_id && chat.contact_id === newMsg.contact_id) ||
+          chat.thread_aliases?.includes(`chat:${newMsg.chat_id}`) ||
+          chat.thread_aliases?.includes(`phone:${newMsg.sender_phone}`)
+        );
+
+        if (chatIdx !== -1) {
+          const updated = [...prev];
+          const currentDate = new Date(updated[chatIdx].last_message_at || 0).getTime();
+          const newDate = new Date(newMsg.created_at || 0).getTime();
+          const shouldRefreshPreview = !Number.isFinite(currentDate) || !Number.isFinite(newDate) || newDate >= currentDate;
+
+          updated[chatIdx] = {
+            ...updated[chatIdx],
+            last_message: shouldRefreshPreview ? newMsg.content : updated[chatIdx].last_message,
+            last_message_at: shouldRefreshPreview ? newMsg.created_at : updated[chatIdx].last_message_at,
+            sender_type: shouldRefreshPreview ? newMsg.sender_type : updated[chatIdx].sender_type,
+            deal_id: newMsg.deal_id || updated[chatIdx].deal_id
+          };
+          return updated;
+        }
+
+        refetchInbox();
+        return prev;
+      });
+    };
+
     const channel = supabase
       .channel('global-chat-inbox')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'deal_conversations' }, (payload) => {
-        const newMsg = payload.new;
-        
-        setInbox(prev => {
-          if (!prev) return prev;
-          
-          const chatIdx = prev.findIndex(chat => 
-            chat.id === newMsg.chat_id || 
-            (newMsg.contact_id && chat.contact_id === newMsg.contact_id) ||
-            chat.thread_aliases?.includes(`chat:${newMsg.chat_id}`) ||
-            chat.thread_aliases?.includes(`phone:${newMsg.sender_phone}`)
-          );
-
-          if (chatIdx !== -1) {
-            const updated = [...prev];
-            updated[chatIdx] = {
-              ...updated[chatIdx],
-              last_message: newMsg.content,
-              last_message_at: newMsg.created_at,
-              sender_type: newMsg.sender_type,
-              deal_id: newMsg.deal_id || updated[chatIdx].deal_id
-            };
-            return updated;
-          } else {
-            // Novo lead: Refetch para garantir integridade dos nomes
-            refetchInbox();
-            return prev;
-          }
-        });
+        if (payload.new) applyInboxMessage(payload.new);
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'deal_conversations' }, (payload) => {
+        if (payload.new) applyInboxMessage(payload.new);
       })
       .subscribe();
     return () => supabase.removeChannel(channel);
@@ -314,6 +408,8 @@ export default function WhatsAppInbox() {
   // 2. Buscar mensagens quando selecionar um chat (Suporte a Leads e Deals)
   useEffect(() => {
     if (activeDealId || activeChatPhone || activeChatId) {
+      pendingInitialScrollRef.current = true;
+      setReplyToMessage(null);
       loadMessages({
         dealId: activeDealId,
         phone: activeChatPhone,
@@ -334,14 +430,54 @@ export default function WhatsAppInbox() {
 
             setMessages(prev => {
                // Evitar duplicidade com optimistic records
-               const alreadyExists = prev.some(m => m.id === newMsg.id || (m.is_optimistic && m.content === newMsg.content));
+               const alreadyExists = prev.some((m) => {
+                 if (m.id === newMsg.id) return true;
+                 if (m.external_message_id && newMsg.external_message_id && m.external_message_id === newMsg.external_message_id) return true;
+                 if (!m.is_optimistic) return false;
+                 if ((m.message_type || 'text') !== (newMsg.message_type || 'text')) return false;
+                 if ((m.message_type || 'text') !== 'text' && m.media_url && newMsg.media_url && m.media_url !== newMsg.media_url) return false;
+                 return String(m.content || '').trim() === String(newMsg.content || '').trim();
+               });
                if (alreadyExists) {
                   // Se jÃ¡ existe (ex: acabou de ser enviado pessimamente), sÃ³ removemos a flag de otimismo se for o caso
-                  return prev.map(m => (m.is_optimistic && m.content === newMsg.content) ? newMsg : m);
+                  return prev.map((m) => {
+                    if (m.id === newMsg.id) return newMsg;
+                    if (m.external_message_id && newMsg.external_message_id && m.external_message_id === newMsg.external_message_id) return newMsg;
+                    if (!m.is_optimistic) return m;
+                    if ((m.message_type || 'text') !== (newMsg.message_type || 'text')) return m;
+                    if ((m.message_type || 'text') !== 'text' && m.media_url && newMsg.media_url && m.media_url !== newMsg.media_url) return m;
+                    return String(m.content || '').trim() === String(newMsg.content || '').trim() ? newMsg : m;
+                  });
                }
+               pendingInitialScrollRef.current = false;
                return [...prev, newMsg];
             });
           }
+        })
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'deal_conversations'
+        }, (payload) => {
+          if (!payload.new) return;
+          const updatedMsg = payload.new;
+          if (!messageBelongsToActiveThread(updatedMsg)) return;
+
+          setMessages(prev => {
+            const existing = prev.some((message) =>
+              message.id === updatedMsg.id ||
+              (message.external_message_id && updatedMsg.external_message_id && message.external_message_id === updatedMsg.external_message_id)
+            );
+
+            if (!existing) return [...prev, updatedMsg];
+
+            return prev.map((message) =>
+              message.id === updatedMsg.id ||
+              (message.external_message_id && updatedMsg.external_message_id && message.external_message_id === updatedMsg.external_message_id)
+                ? updatedMsg
+                : message
+            );
+          });
         })
         .subscribe();
       return () => {
@@ -354,10 +490,14 @@ export default function WhatsAppInbox() {
 
   async function loadMessages(context) {
     try {
+      setIsLoadingMessages(true);
       const msgs = await getConversationsByContext(context);
       setMessages(msgs);
     } catch (err) {
       console.error(err);
+      setMessages([]);
+    } finally {
+      setIsLoadingMessages(false);
     }
   }
 
@@ -405,24 +545,94 @@ export default function WhatsAppInbox() {
 
   // Auto-scroll sempre que as mensagens mudarem
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTo({
-        top: scrollRef.current.scrollHeight,
-        behavior: 'smooth'
-      });
+    if (!displayedMessages.length) return;
+    scrollToLatestMessage(pendingInitialScrollRef.current ? 'auto' : 'smooth');
+    pendingInitialScrollRef.current = false;
+  }, [displayedMessages.length, activeChatId, activeChatPhone, scrollToLatestMessage]);
+
+  const processSendQueue = React.useCallback(async () => {
+    if (isProcessingSendQueueRef.current) return;
+
+    isProcessingSendQueueRef.current = true;
+    setIsSending(true);
+
+    try {
+      while (sendQueueRef.current.length) {
+        const item = sendQueueRef.current[0];
+        setSendQueueSize(sendQueueRef.current.length);
+
+        setMessages(prev => prev.map(message =>
+          message.id === item.tempId
+            ? {
+                ...message,
+                metadata: {
+                  ...(message.metadata || {}),
+                  send_status: 'sending',
+                  send_error: null
+                }
+              }
+            : message
+        ));
+
+        try {
+          const savedMessage = await createConversation(
+            item.dealId,
+            item.content,
+            'sales',
+            'whatsapp',
+            item.recipientId,
+            item.mediaUrl,
+            item.messageType,
+            item.options
+          );
+
+          setMessages(prev => prev.map(message => message.id === item.tempId ? savedMessage : message));
+        } catch (err) {
+          console.error('Erro ao enviar WhatsApp:', err);
+          setMessages(prev => prev.map(message =>
+            message.id === item.tempId
+              ? {
+                  ...message,
+                  is_optimistic: false,
+                  metadata: {
+                    ...(message.metadata || {}),
+                    send_status: 'failed',
+                    send_error: err.message || 'Falha ao enviar.'
+                  }
+                }
+              : message
+          ));
+          alert('Erro ao enviar: ' + (err.message || 'Falha ao enviar mensagem.'));
+        } finally {
+          sendQueueRef.current.shift();
+          setSendQueueSize(sendQueueRef.current.length);
+        }
+      }
+    } finally {
+      isProcessingSendQueueRef.current = false;
+      setIsSending(false);
+      setSendQueueSize(sendQueueRef.current.length);
     }
-  }, [messages]);
+  }, []);
+
+  const enqueueOutgoingMessage = React.useCallback((item) => {
+    sendQueueRef.current.push(item);
+    setSendQueueSize(sendQueueRef.current.length);
+    processSendQueue();
+  }, [processSendQueue]);
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
     const currentContext = activeDealId || activeChatPhone || activeChatId;
-    if (!newMessage.trim() || !currentContext || isSending) return;
+    if (!newMessage.trim() || !currentContext) return;
 
-    const content = newMessage;
+    const content = newMessage.trim();
+    const replySnapshot = replyToMessage;
     setNewMessage(''); 
+    setShowEmojiPicker(false);
+    setReplyToMessage(null);
     
-    // [Optimistic UI] Adicionar mensagem localmente
-    const tempId = `temp-${Date.now()}`;
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const optimisticMsg = {
       id: tempId,
       deal_id: activeDealId,
@@ -432,27 +642,35 @@ export default function WhatsAppInbox() {
       sender_type: 'sales',
       source: 'whatsapp',
       created_at: new Date().toISOString(),
+      message_type: 'text',
+      metadata: {
+        ...(replySnapshot ? {
+          reply_to_message_id: replySnapshot.externalId,
+          reply_to_content: replySnapshot.content,
+          reply_to_sender: replySnapshot.sender
+        } : {}),
+        send_status: sendQueueRef.current.length || isProcessingSendQueueRef.current ? 'queued' : 'sending'
+      },
       is_optimistic: true
     };
     
     setMessages(prev => [...prev, optimisticMsg]);
-
-    try {
-      setIsSending(true);
-      // v22: Enviamos o Id completo (JID) para evitar duplicidade
-      const savedMessage = await createConversation(activeDealId, content, 'sales', 'whatsapp', activeRecipientId, null, 'text', {
+    enqueueOutgoingMessage({
+      tempId,
+      dealId: activeDealId,
+      content,
+      recipientId: activeRecipientId,
+      mediaUrl: null,
+      messageType: 'text',
+      options: {
         chatId: activeChatId,
         recipientPhone: activeRecipientId,
-        senderPhone: activeSenderPhone
-      });
-      setMessages(prev => prev.map(m => m.id === tempId ? savedMessage : m));
-    } catch (err) {
-      setMessages(prev => prev.filter(m => m.id !== tempId));
-      setNewMessage(content);
-      alert('Erro ao enviar: ' + err.message);
-    } finally {
-      setIsSending(false);
-    }
+        senderPhone: activeSenderPhone,
+        replyToMessageId: replySnapshot?.externalId,
+        replyToContent: replySnapshot?.content,
+        replyToSender: replySnapshot?.sender
+      }
+    });
   };
 
   /**
@@ -521,10 +739,33 @@ export default function WhatsAppInbox() {
         .from('whatsapp_media')
         .getPublicUrl(filePath);
 
-      await createConversation(activeDealId, 'Mensagem de voz', 'sales', 'whatsapp', activeRecipientId, publicUrl, 'audio', {
-        chatId: activeChatId,
-        recipientPhone: activeRecipientId,
-        senderPhone: activeSenderPhone
+      const tempId = `temp-audio-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      setMessages(prev => [...prev, {
+        id: tempId,
+        deal_id: activeDealId,
+        sender_phone: activeChatPhone,
+        chat_id: activeChatId,
+        content: 'Mensagem de voz',
+        sender_type: 'sales',
+        source: 'whatsapp',
+        created_at: new Date().toISOString(),
+        message_type: 'audio',
+        media_url: publicUrl,
+        metadata: { send_status: sendQueueRef.current.length || isProcessingSendQueueRef.current ? 'queued' : 'sending' },
+        is_optimistic: true
+      }]);
+      enqueueOutgoingMessage({
+        tempId,
+        dealId: activeDealId,
+        content: 'Mensagem de voz',
+        recipientId: activeRecipientId,
+        mediaUrl: publicUrl,
+        messageType: 'audio',
+        options: {
+          chatId: activeChatId,
+          recipientPhone: activeRecipientId,
+          senderPhone: activeSenderPhone
+        }
       });
     } catch (err) {
       console.error('Erro ao enviar Ã¡udio:', err);
@@ -568,11 +809,34 @@ export default function WhatsAppInbox() {
       else if (file.type.startsWith('audio/')) type = 'audio';
       else if (file.type.startsWith('video/')) type = 'video';
 
-      // 4. Salvar e Disparar
-      await createConversation(activeDealId, `Arquivo: ${file.name}`, 'sales', 'whatsapp', activeRecipientId, publicUrl, type, {
-        chatId: activeChatId,
-        recipientPhone: activeRecipientId,
-        senderPhone: activeSenderPhone
+      const tempId = `temp-file-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const content = `Arquivo: ${file.name}`;
+      setMessages(prev => [...prev, {
+        id: tempId,
+        deal_id: activeDealId,
+        sender_phone: activeChatPhone,
+        chat_id: activeChatId,
+        content,
+        sender_type: 'sales',
+        source: 'whatsapp',
+        created_at: new Date().toISOString(),
+        message_type: type,
+        media_url: publicUrl,
+        metadata: { send_status: sendQueueRef.current.length || isProcessingSendQueueRef.current ? 'queued' : 'sending' },
+        is_optimistic: true
+      }]);
+      enqueueOutgoingMessage({
+        tempId,
+        dealId: activeDealId,
+        content,
+        recipientId: activeRecipientId,
+        mediaUrl: publicUrl,
+        messageType: type,
+        options: {
+          chatId: activeChatId,
+          recipientPhone: activeRecipientId,
+          senderPhone: activeSenderPhone
+        }
       });
       
     } catch (err) {
@@ -629,10 +893,7 @@ export default function WhatsAppInbox() {
     const anchorPhone = activeChatPhone || activeChat.contact_phone;
     console.log('[Stitch Oracle] MODO GLOBAL ATIVADO para:', anchorPhone);
     setIsGlobalAnalyzing(true);
-    
-    if (scrollRef.current) {
-      scrollRef.current.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+    setShowOracleModal(true);
     
     try {
       // 1. Analise global exige um negocio real no pipeline.
@@ -682,6 +943,7 @@ export default function WhatsAppInbox() {
         ai_global_analysis: aiResponse || prev.ai_global_analysis,
         is_qualified: true
       } : prev);
+      scrollToLatestMessage('smooth');
 
       // 3. [BACKUP SYNC] Opcional: Refetch longo prazo
       setTimeout(async () => {
@@ -854,6 +1116,7 @@ export default function WhatsAppInbox() {
               <button 
                 key={chatKey}
                 onClick={() => {
+                  pendingInitialScrollRef.current = true;
                   setActiveChat(chat);
                   setMessages([]); // Limpeza visual imediata
                 }}
@@ -1061,71 +1324,10 @@ export default function WhatsAppInbox() {
                  </span>
               </div>
 
-              {/* ðŸ§  ORACLE GLOBAL INSIGHT 360Â° (Safety Lockdown v8.2) */}
-              {isGlobalAnalyzing ? (
-                <div 
-                  className="mb-10 p-1 bg-gradient-to-br from-primary/20 via-slate-100 to-transparent rounded-[3rem] animate-pulse"
-                >
-                  <div className="bg-white/90 backdrop-blur-2xl rounded-[2.9rem] p-10 shadow-xl border border-white flex flex-col items-center gap-6">
-                     <div className="w-16 h-16 rounded-3xl bg-primary/10 flex items-center justify-center">
-                        <LoadingSpinner size="md" />
-                     </div>
-                     <div className="text-center">
-                        <h4 className="text-[12px] font-black uppercase tracking-[0.4em] text-primary mb-2">OrÃ¡culo Processando...</h4>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Sincronizando HistÃ³rico 360Â° â€¢ Aguarde</p>
-                     </div>
-                  </div>
-                </div>
-              ) : activeChat?.ai_global_analysis?.diagnostic ? (
-                <div 
-                  className="mb-10 p-1 bg-gradient-to-br from-primary/30 via-primary/5 to-transparent rounded-[3rem]"
-                >
-                  <div className="bg-white/90 backdrop-blur-2xl rounded-[2.9rem] p-10 shadow-2xl relative overflow-hidden group/global border border-white">
-                    <div className="absolute -top-10 -right-10 w-40 h-40 bg-primary/5 rounded-full blur-3xl" />
-                    
-                    <div className="flex justify-between items-start mb-8">
-                      <div className="flex items-center gap-4">
-                        <div className="w-14 h-14 rounded-[1.5rem] bg-primary text-white flex items-center justify-center shadow-2xl shadow-primary/20 animate-pulse">
-                          <span className="material-symbols-outlined text-2xl">auto_awesome</span>
-                        </div>
-                        <div>
-                          <h4 className="text-[12px] font-black uppercase tracking-[0.4em] text-primary">DiagnÃ³stico Global Oracle</h4>
-                          <p className="text-[10px] font-bold text-slate-400 mt-1">VisÃ£o EstratÃ©gica 360Â° â€¢ Baseado no HistÃ³rico Completo</p>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col items-end">
-                         <div className="px-4 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[9px] font-black uppercase tracking-widest border border-emerald-100">
-                           Probabilidade: {activeChat.ai_global_analysis.closing_probability}%
-                         </div>
-                         <p className="text-[8px] font-bold text-slate-300 mt-2 uppercase">Atualizado agora</p>
-                      </div>
-                    </div>
-
-                    <div className="grid md:grid-cols-2 gap-8 relative z-10">
-                      <div className="space-y-4">
-                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">AnÃ¡lise do Comportamento</span>
-                         <div className="p-5 bg-slate-50/50 rounded-3xl border border-slate-100 leading-relaxed text-sm font-bold text-slate-700 italic">
-                           "{activeChat.ai_global_analysis.diagnostic}"
-                         </div>
-                      </div>
-
-                      <div className="space-y-4">
-                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">PrÃ³xima Grande Jogada</span>
-                         <div className="bg-primary/5 p-6 rounded-3xl border border-primary/10">
-                           <p className="text-sm font-manrope font-black text-primary mb-5">
-                             {activeChat.ai_global_analysis.recommended_action?.suggested_message}
-                           </p>
-                           <button 
-                              onClick={() => handleApplySuggestion(activeChat.ai_global_analysis.recommended_action?.suggested_message)}
-                              className="w-full py-3.5 bg-primary text-white rounded-2xl text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:scale-[1.02] shadow-xl shadow-primary/20 transition-all"
-                           >
-                             <span className="material-symbols-outlined text-sm">content_copy</span>
-                             Usar EstratÃ©gia Recomendada
-                           </button>
-                         </div>
-                      </div>
-                    </div>
+              {!isLoadingMessages && displayedMessages.length === 0 ? (
+                <div className="flex justify-center py-10">
+                  <div className="px-6 py-4 rounded-3xl bg-white/80 border border-white/70 shadow-sm text-sm font-bold text-slate-500">
+                    Nenhuma mensagem encontrada neste atendimento.
                   </div>
                 </div>
               ) : null}
@@ -1133,12 +1335,19 @@ export default function WhatsAppInbox() {
               {displayedMessages.map((msg) => {
                 const isMe = msg.sender_type === 'sales';
                 const hasAI = msg.metadata?.ai_analysis;
+                const sendStatus = msg.metadata?.send_status;
+                const replyMeta = msg.metadata?.reply_to_content || msg.metadata?.reply_to_message_id
+                  ? {
+                      sender: msg.metadata?.reply_to_sender || 'Mensagem citada',
+                      content: msg.metadata?.reply_to_content || 'Mensagem citada'
+                    }
+                  : null;
 
                 return (
                   <div key={msg.id} className="w-full">
                     <div 
                       className={cn(
-                        "flex flex-col max-w-[80%] animate-in slide-in-from-bottom-2 duration-300 relative group",
+                        "flex flex-col max-w-[80%] animate-in slide-in-from-bottom-2 duration-300 relative",
                         isMe ? "ml-auto items-end" : "items-start"
                       )}
                     >
@@ -1147,22 +1356,49 @@ export default function WhatsAppInbox() {
                         <button 
                           onClick={() => handleAnalyzeConversation(msg.id)}
                           className={cn(
-                            "absolute -right-10 top-1 w-8 h-8 bg-white/80 backdrop-blur-md rounded-xl shadow-sm border border-white/40 text-primary flex items-center justify-center transition-all hover:scale-110 hover:bg-white hover:shadow-md active:scale-90 z-20",
-                            analyzingIds.has(msg.id) ? "opacity-100" : "opacity-30 group-hover:opacity-100"
+                            "absolute -right-9 top-8 w-7 h-7 bg-white/90 backdrop-blur-md rounded-full shadow-sm border border-white/70 text-primary flex items-center justify-center transition-all hover:scale-110 hover:bg-white hover:shadow-md active:scale-90 z-20",
+                            analyzingIds.has(msg.id) ? "opacity-100" : "opacity-0 group-hover/bubble:opacity-90"
                           )}
                           title="AnÃ¡lise estratÃ©gica do Oracle"
                         >
-                          <span className={cn("material-symbols-outlined text-[16px]", analyzingIds.has(msg.id) && "animate-spin")}>bolt</span>
+                          <span className={cn("material-symbols-outlined text-[14px]", analyzingIds.has(msg.id) && "animate-spin")}>bolt</span>
                         </button>
                       )}
 
                       <div className={cn(
-                        "px-7 py-5 rounded-[2rem] text-lg font-semibold shadow-md transition-all border leading-relaxed",
+                        "relative group/bubble px-7 py-5 rounded-[2rem] text-lg font-semibold shadow-md transition-all border leading-relaxed",
                         isMe 
                           ? "bg-primary text-white border-primary/20 rounded-tr-sm shadow-primary/20" 
                           : "bg-white/95 text-slate-800 border-white/80 rounded-tl-sm hover:shadow-lg",
                         msg.is_optimistic && "opacity-70 animate-pulse"
                       )}>
+                        <button
+                          onClick={() => setReplyToMessage(getReplyPreview(msg))}
+                          disabled={!msg.external_message_id}
+                          className={cn(
+                            "absolute top-2 w-7 h-7 bg-white/95 backdrop-blur-md rounded-full shadow-md border border-slate-100 text-slate-500 flex items-center justify-center transition-all hover:scale-110 hover:bg-white hover:text-primary hover:shadow-lg active:scale-95 z-20",
+                            isMe ? "left-2 -translate-x-full -ml-1" : "right-2 translate-x-full mr-1",
+                            !msg.external_message_id ? "hidden" : "opacity-0 group-hover/bubble:opacity-100"
+                          )}
+                          title="Responder esta mensagem"
+                        >
+                          <Reply className="w-3.5 h-3.5" />
+                        </button>
+
+                        {replyMeta && (
+                          <div className={cn(
+                            "mb-3 rounded-2xl border-l-4 px-4 py-3 text-sm",
+                            isMe ? "bg-white/10 border-white/70 text-white/90" : "bg-slate-50 border-primary/70 text-slate-700"
+                          )}>
+                            <p className={cn("text-[10px] font-black uppercase tracking-widest mb-1", isMe ? "text-white/70" : "text-primary")}>
+                              Respondendo {replyMeta.sender}
+                            </p>
+                            <p className="font-bold leading-snug line-clamp-3">
+                              {replyMeta.content}
+                            </p>
+                          </div>
+                        )}
+                        
                         
                         {/* ðŸ–¼ï¸ RENDERIZADOR MULTIMÃDIA ELITE (v8.0) */}
                         {msg.message_type === 'image' && msg.media_url && (
@@ -1222,16 +1458,32 @@ export default function WhatsAppInbox() {
                         )}
 
                         <div className={cn(
-                          "leading-relaxed",
+                          "leading-relaxed whitespace-pre-wrap break-words",
                           msg.message_type !== 'text' && "mt-3 pt-3 border-t font-semibold text-base",
                           msg.message_type !== 'text' && (isMe ? "border-white/10 text-white/95 italic" : "border-slate-100 text-slate-700 italic")
                         )}>
                           {msg.content}
                         </div>
+
+                        {sendStatus && (
+                          <div className={cn(
+                            "mt-3 pt-2 border-t text-[10px] font-black uppercase tracking-[0.18em]",
+                            sendStatus === 'failed'
+                              ? "border-red-200 text-red-100"
+                              : isMe
+                                ? "border-white/10 text-white/70"
+                                : "border-slate-100 text-slate-400"
+                          )}>
+                            {sendStatus === 'queued' && 'Na fila'}
+                            {sendStatus === 'sending' && 'Enviando'}
+                            {sendStatus === 'failed' && (msg.metadata?.send_error || 'Falha ao enviar')}
+                          </div>
+                        )}
                       </div>
 
                       <span className="text-[11px] text-slate-600 mt-2 font-black uppercase tracking-[0.12em] px-4">
                         {isMe ? 'VocÃª' : 'Cliente'} â€¢ {msg.created_at ? formatRelative(new Date(msg.created_at), new Date(), { locale: ptBR }) : 'Agora'}
+                        {msg.metadata?.is_edited ? ' â€¢ Editada' : ''}
                       </span>
                     </div>
 
@@ -1299,10 +1551,31 @@ export default function WhatsAppInbox() {
                   </div>
                 );
               })}
+              <div ref={latestMessageRef} className="h-px w-full" aria-hidden="true" />
             </div>
 
             {/* Input de Mensagem */}
             <div className="p-7 bg-white/55 border-t border-white/60 backdrop-blur-2xl">
+              {replyToMessage && (
+                <div className="mb-3 mx-2 rounded-2xl bg-white/90 border border-primary/15 border-l-4 border-l-primary px-5 py-3 shadow-sm flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-primary mb-1">
+                      Respondendo {replyToMessage.sender}
+                    </p>
+                    <p className="text-sm font-bold text-slate-700 truncate">
+                      {replyToMessage.content}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setReplyToMessage(null)}
+                    className="p-1.5 rounded-xl text-slate-400 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+                    title="Cancelar resposta"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
               <div className={cn(
                 "relative flex items-center gap-4 bg-white/95 p-2 rounded-[2.5rem] shadow-2xl border border-white/80 transition-all",
                 isRecording ? " ring-4 ring-red-500/10 border-red-100" : "focus-within:ring-4 ring-primary/5"
@@ -1314,6 +1587,53 @@ export default function WhatsAppInbox() {
                   onChange={handleFileUpload}
                   accept="image/*,audio/*,video/*,application/pdf"
                 />
+                <AnimatePresence>
+                  {showEmojiPicker && !isRecording && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 12, scale: 0.98 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 12, scale: 0.98 }}
+                      className="absolute left-5 bottom-[5.25rem] z-50 w-[min(420px,calc(100vw-2rem))] rounded-[1.75rem] bg-white/95 backdrop-blur-2xl border border-white/80 shadow-2xl p-4"
+                    >
+                      <div className="relative mb-3">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <input
+                          type="text"
+                          value={emojiSearch}
+                          onChange={(event) => setEmojiSearch(event.target.value)}
+                          placeholder="Pesquisar emoji"
+                          className="w-full pl-10 pr-4 py-3 rounded-2xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-4 focus:ring-primary/10"
+                        />
+                      </div>
+
+                      <div className="max-h-72 overflow-y-auto custom-scrollbar pr-1 space-y-4">
+                        {filteredEmojiCategories.length ? filteredEmojiCategories.map((category) => (
+                          <div key={category.label}>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 px-1">
+                              {category.label}
+                            </p>
+                            <div className="grid grid-cols-8 gap-1">
+                              {category.emojis.map((emoji) => (
+                                <button
+                                  key={`${category.label}-${emoji}`}
+                                  type="button"
+                                  onClick={() => insertEmoji(emoji)}
+                                  className="h-10 rounded-xl text-2xl flex items-center justify-center hover:bg-primary/10 active:scale-90 transition-all"
+                                >
+                                  {emoji}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )) : (
+                          <div className="py-8 text-center text-sm font-bold text-slate-400">
+                            Nenhum emoji encontrado.
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
                 
                 {!isRecording ? (
                   <>
@@ -1328,8 +1648,21 @@ export default function WhatsAppInbox() {
                       <Paperclip className="w-6 h-6" />
                     </button>
 
+                    <button
+                      type="button"
+                      onClick={() => setShowEmojiPicker(prev => !prev)}
+                      className={cn(
+                        "p-3 rounded-full transition-all text-slate-700 hover:bg-slate-50 hover:text-primary",
+                        showEmojiPicker && "bg-primary/10 text-primary"
+                      )}
+                      title="Enviar emoji"
+                    >
+                      <Smile className="w-6 h-6" />
+                    </button>
+
                     <input 
                       type="text" 
+                      ref={messageInputRef}
                       value={newMessage}
                       onChange={(e) => setNewMessage(e.target.value)}
                       onKeyDown={(e) => {
@@ -1354,10 +1687,12 @@ export default function WhatsAppInbox() {
                     <button 
                       type="button"
                       onClick={handleSendMessage}
-                      disabled={isSending || isUploading || !newMessage.trim()}
+                      disabled={isUploading || !newMessage.trim()}
                       className="px-8 py-4 bg-primary text-white rounded-[2rem] font-black text-sm uppercase tracking-widest flex items-center gap-2 hover:bg-primary-container transition-all shadow-xl shadow-primary/20 active:scale-95 disabled:opacity-50"
                     >
-                      {isSending ? <LoadingSpinner size="sm" /> : <><Send className="w-4 h-4" /> Enviar</>}
+                      {isSending && !newMessage.trim()
+                        ? <LoadingSpinner size="sm" />
+                        : <><Send className="w-4 h-4" /> {sendQueueSize > 0 ? `Enviar (${sendQueueSize})` : 'Enviar'}</>}
                     </button>
                   </>
                 ) : (
@@ -1405,6 +1740,79 @@ export default function WhatsAppInbox() {
         )}
       </div>
       </div>
+
+      <Modal
+        isOpen={showOracleModal}
+        onClose={() => setShowOracleModal(false)}
+        title="Diagnóstico Oracle"
+        className="max-w-3xl"
+        footer={
+          <div className="flex items-center justify-end gap-3">
+            {activeChat?.ai_global_analysis?.recommended_action?.suggested_message && !isGlobalAnalyzing ? (
+              <button
+                onClick={() => {
+                  handleApplySuggestion(activeChat.ai_global_analysis.recommended_action?.suggested_message);
+                  setShowOracleModal(false);
+                }}
+                className="px-6 py-3 rounded-2xl bg-primary text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-primary/20 transition-all active:scale-95 flex items-center gap-2"
+              >
+                <span className="material-symbols-outlined text-sm">content_copy</span>
+                Usar sugestão
+              </button>
+            ) : null}
+            <button
+              onClick={() => setShowOracleModal(false)}
+              className="px-6 py-3 rounded-2xl text-slate-500 font-bold text-xs uppercase tracking-widest hover:bg-slate-100 transition-colors"
+            >
+              Fechar
+            </button>
+          </div>
+        }
+      >
+        {isGlobalAnalyzing ? (
+          <div className="py-16 flex flex-col items-center justify-center text-center gap-6">
+            <div className="w-16 h-16 rounded-3xl bg-primary/10 flex items-center justify-center">
+              <LoadingSpinner size="md" />
+            </div>
+            <div>
+              <h4 className="text-[12px] font-black uppercase tracking-[0.35em] text-primary mb-3">Oracle processando</h4>
+              <p className="text-sm font-bold text-slate-500">Analisando o histórico completo da conversa.</p>
+            </div>
+          </div>
+        ) : activeChat?.ai_global_analysis?.diagnostic ? (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.28em] text-slate-400 mb-2">Atendimento</p>
+                <h3 className="text-xl font-black text-slate-900">{activeChat.contact_name}</h3>
+              </div>
+              <div className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-black uppercase tracking-widest border border-emerald-100">
+                Probabilidade: {activeChat.ai_global_analysis.closing_probability}%
+              </div>
+            </div>
+
+            <div className="p-6 bg-slate-50/80 rounded-3xl border border-slate-100">
+              <p className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-400 mb-3">Análise do comportamento</p>
+              <p className="text-base font-bold leading-relaxed text-slate-800 whitespace-pre-wrap">
+                {activeChat.ai_global_analysis.diagnostic}
+              </p>
+            </div>
+
+            {activeChat.ai_global_analysis.recommended_action?.suggested_message ? (
+              <div className="p-6 bg-primary/5 rounded-3xl border border-primary/10">
+                <p className="text-[10px] font-black uppercase tracking-[0.25em] text-primary mb-3">Próxima resposta sugerida</p>
+                <p className="text-base font-black leading-relaxed text-primary whitespace-pre-wrap">
+                  {activeChat.ai_global_analysis.recommended_action.suggested_message}
+                </p>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="py-12 text-center">
+            <p className="text-sm font-bold text-slate-500">Nenhum diagnóstico disponível para esta conversa ainda.</p>
+          </div>
+        )}
+      </Modal>
 
       {/* ðŸš€ MODAL DE QUALIFICAÃ‡ÃƒO (DealForm Reutilizado) */}
       <Modal

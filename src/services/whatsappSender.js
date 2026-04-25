@@ -12,9 +12,9 @@ async function throwFunctionError(error) {
   throw error;
 }
 
-export async function sendWhatsAppMessage(phone, message) {
+export async function sendWhatsAppMessage(phone, message, messageId = null) {
   const { data, error } = await supabase.functions.invoke('send-whatsapp', {
-    body: { phone, message, type: 'text' }
+    body: { phone, message, messageId, type: 'text' }
   });
 
   if (error) await throwFunctionError(error);
