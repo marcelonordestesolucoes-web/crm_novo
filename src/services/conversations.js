@@ -5,6 +5,41 @@ import { supabase } from '@/lib/supabase';
 import { sendWhatsAppMessage, sendWhatsAppMedia } from './whatsappSender';
 import { getUserPermissions } from './auth';
 
+function getPhoneVariants(value) {
+  const raw = String(value || '');
+  if (!raw || raw.includes('@lid') || raw.includes('@g.us')) return [];
+
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length < 10) return [];
+
+  const variants = new Set([digits]);
+  if (digits.startsWith('55') && digits.length === 12) {
+    const withNine = `${digits.slice(0, 4)}9${digits.slice(4)}`;
+    variants.add(withNine);
+    variants.add(digits.slice(2));
+    variants.add(withNine.slice(2));
+  }
+  if (digits.startsWith('55') && digits.length === 13 && digits[4] === '9') {
+    variants.add(`${digits.slice(0, 4)}${digits.slice(5)}`);
+    variants.add(digits.slice(2));
+    variants.add(`${digits.slice(2, 4)}${digits.slice(5)}`);
+  }
+  if (!digits.startsWith('55') && digits.length === 10) {
+    const withNine = `${digits.slice(0, 2)}9${digits.slice(2)}`;
+    variants.add(`55${digits}`);
+    variants.add(withNine);
+    variants.add(`55${withNine}`);
+  }
+  if (!digits.startsWith('55') && digits.length === 11 && digits[2] === '9') {
+    variants.add(`55${digits}`);
+    variants.add(digits);
+    variants.add(`${digits.slice(0, 2)}${digits.slice(3)}`);
+    variants.add(`55${digits.slice(0, 2)}${digits.slice(3)}`);
+  }
+
+  return [...variants];
+}
+
 /**
  * Busca todas as conversas vinculadas a um negócio específico.
  * @param {string} dealId - ID do negócio.
@@ -15,23 +50,24 @@ import { getUserPermissions } from './auth';
  * @param {Object} context - { dealId, phone }
  * @returns {Promise<Array>} - Lista de conversas ordenada pela mais recente.
  */
-export async function getConversationsByContext({ dealId, phone, chatId, contactId, aliases = [] }) {
-  if (!dealId && !phone && !chatId && !contactId && !aliases.length) return [];
+export async function getConversationsByContext({ dealId, phone, chatId, contactId, threadId, aliases = [] }) {
+  if (!dealId && !phone && !chatId && !contactId && !threadId && !aliases.length) return [];
   const { orgId } = await getUserPermissions();
   if (!orgId) return [];
 
-  // [ELITE NORMALIZATION] Garantir que o telefone esteja limpo para a busca
-  const cleanPhone = phone && !String(phone).includes('@lid') && !String(phone).includes('@g.us')
-    ? String(phone).replace(/\D/g, '')
-    : null;
+  const phoneVariants = getPhoneVariants(phone);
 
   let query = supabase.from('deal_conversations').select('*').eq('org_id', orgId);
   
   // Construção da query OR agressiva (suporta ID de negócio, telefone ou o novo chat_id)
   const orConditions = [];
+  if (threadId) orConditions.push(`thread_id.eq.${threadId}`);
   if (dealId) orConditions.push(`deal_id.eq.${dealId}`);
   if (contactId) orConditions.push(`contact_id.eq.${contactId}`);
-  if (cleanPhone) orConditions.push(`sender_phone.eq.${cleanPhone}`);
+  phoneVariants.forEach((variant) => {
+    orConditions.push(`sender_phone.eq.${variant}`);
+    orConditions.push(`chat_id.eq.${variant}@c.us`);
+  });
   if (phone) orConditions.push(`sender_phone.eq.${phone}`);
   if (chatId) orConditions.push(`chat_id.eq.${chatId}`);
 
@@ -41,7 +77,13 @@ export async function getConversationsByContext({ dealId, phone, chatId, contact
     if (!value) return;
 
     if (type === 'contact') orConditions.push(`contact_id.eq.${value}`);
-    if (type === 'phone') orConditions.push(`sender_phone.eq.${value}`);
+    if (type === 'phone') {
+      getPhoneVariants(value).forEach((variant) => {
+        orConditions.push(`sender_phone.eq.${variant}`);
+        orConditions.push(`chat_id.eq.${variant}@c.us`);
+      });
+      orConditions.push(`sender_phone.eq.${value}`);
+    }
     if (type === 'chat') orConditions.push(`chat_id.eq.${value}`);
   });
 
@@ -96,6 +138,7 @@ export async function createConversation(
   const normalizedChatId = options.chatId || phone;
   const recipientPhone = options.recipientPhone || phone;
   const senderPhone = options.senderPhone || recipientPhone || phone;
+  const threadId = options.threadId || null;
   const replyToMessageId = options.replyToMessageId || options.quotedMessageId || null;
   const replyToContent = options.replyToContent || null;
   const replyToSender = options.replyToSender || null;
@@ -130,6 +173,7 @@ export async function createConversation(
         sender_type: senderType,
         source: source,
         sender_phone: senderPhone,
+        thread_id: threadId,
         org_id: membership?.org_id,
         chat_id: normalizedChatId,
         external_message_id: externalId,

@@ -1,4 +1,4 @@
-﻿// src/views/Messages/WhatsAppInbox.jsx
+// src/views/Messages/WhatsAppInbox.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, MoreVertical, Send, Phone, User, Filter, ArrowLeft, Rocket, CheckCircle2, Users, Image as ImageIcon, Mic, FileText, Play, Download, Trash2, Paperclip, X, Reply, Smile } from 'lucide-react';
@@ -8,6 +8,7 @@ import { getWhatsAppInbox, deleteChat } from '@/services/whatsapp';
 import { getConversationsByContext, createConversation } from '@/services/conversations';
 import { getUserPermissions } from '@/services/auth';
 import { getPipelines, getPipelineStages } from '@/services/pipelines';
+import { getFlows } from '@/services/flows';
 import { supabase } from '@/lib/supabase';
 import { LoadingSpinner, GlassCard, Modal, Badge } from '@/components/ui';
 import { DealForm } from '@/views/Funnel/DealForm';
@@ -56,6 +57,10 @@ export default function WhatsAppInbox() {
   const [replyToMessage, setReplyToMessage] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [emojiSearch, setEmojiSearch] = useState('');
+  const [showFlowModal, setShowFlowModal] = useState(false);
+  const [flows, setFlows] = useState([]);
+  const [isStartingFlow, setIsStartingFlow] = useState(false);
+  const [unreadCounts, setUnreadCounts] = useState({});
   const pendingInitialScrollRef = useRef(false);
   
   // [AUDIO RECORDING v29] Estados para o Gravador de Voz
@@ -91,8 +96,57 @@ export default function WhatsAppInbox() {
       isMounted = false;
     };
   }, []);
+
+  // [FLOWS v1.1] Carregar fluxos ativos para o modal de ativação
+  useEffect(() => {
+    if (showFlowModal) {
+      const loadFlows = async () => {
+        try {
+          const allFlows = await getFlows();
+          setFlows(allFlows.filter(f => f.status === 'active'));
+        } catch (err) {
+          console.error('Erro ao carregar fluxos:', err);
+        }
+      };
+      loadFlows();
+    }
+  }, [showFlowModal]);
+
+  const handleStartFlow = async (flowId) => {
+    if (!activeChat?.contact_id) {
+      alert('Este chat não possui um contato vinculado no banco.');
+      return;
+    }
+
+    try {
+      setIsStartingFlow(true);
+      const { orgId } = await getUserPermissions();
+      
+      const { data, error } = await supabase.functions.invoke('process-flow-message', {
+        body: {
+          action: 'start',
+          org_id: orgId,
+          contact_id: activeChat.contact_id,
+          flow_id: flowId,
+          thread_id: activeChat.thread_id,
+          chat_id: activeChat.id,
+          deal_id: activeChat.deal_id
+        }
+      });
+
+      if (error) throw error;
+      
+      setShowFlowModal(false);
+      alert('Fluxo iniciado com sucesso! O contato começará a receber as mensagens em instantes.');
+    } catch (err) {
+      console.error('Erro ao iniciar fluxo:', err);
+      alert('Falha ao iniciar fluxo: ' + (err.message || 'Erro desconhecido'));
+    } finally {
+      setIsStartingFlow(false);
+    }
+  };
   
-  // [ELITE PERFORMANCE] OrdenaÃ§Ã£o memorizada para evitar "travamentos" na UI
+  // [ELITE PERFORMANCE] Ordenação memorizada para evitar "travamentos" na UI
   const sortedInbox = React.useMemo(() => {
     if (!inbox) return [];
     return [...inbox].sort((a, b) => {
@@ -120,26 +174,64 @@ export default function WhatsAppInbox() {
   }, []);
 
   // --- [DERIVED IDENTITIES] ---
-  const activeChatId = activeChat?.id; // Usar a chave Ãºnica reconstruÃ­da (c-ID ou p-Phone)
+  const activeChatId = activeChat?.id; // Usar a chave única reconstruída (c-ID ou p-Phone)
+  const activeThreadKey = activeChat?.thread_key || activeChat?.id;
+  const activeThreadId = activeChat?.thread_id;
   const activeDealId = activeChat?.deal_id;
   const activeChatPhone = activeChat?.contact_phone;
   const activeThreadAliases = React.useMemo(() => activeChat?.thread_aliases || [], [activeChat?.thread_aliases]);
   const isActiveGroupThread = Boolean(activeChatId?.includes('@g.us') || activeChat?.is_group);
-  const activeRecipientId = isActiveGroupThread || activeChatId?.includes('@lid')
+  const activeRecipientId = isActiveGroupThread
     ? (activeChatId || activeChatPhone)
     : (activeChatPhone || activeChatId);
   const activeSenderPhone = activeChatPhone || activeRecipientId;
   const canQualifyActiveChat = Boolean(activeChat) && (!activeDealId || activeChat?.is_qualified === false);
+  const getInboxChatKey = React.useCallback((chat) => chat?.thread_key || chat?.thread_id || chat?.id || chat?.chat_id, []);
 
   const isUuid = (value) =>
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || ''));
 
   const normalizePhoneForMatch = (value) => String(value || '').replace(/\D/g, '');
+  const formatDisplayPhone = (value) => {
+    const digits = normalizePhoneForMatch(value);
+    if (!digits) return '';
+    return digits;
+  };
+
+  const phoneMatchVariants = (value) => {
+    const digits = normalizePhoneForMatch(value);
+    if (!digits) return [];
+
+    const variants = new Set([digits]);
+    if (digits.startsWith('55') && digits.length === 12) {
+      const withNine = `${digits.slice(0, 4)}9${digits.slice(4)}`;
+      variants.add(withNine);
+      variants.add(digits.slice(2));
+      variants.add(withNine.slice(2));
+    }
+    if (digits.startsWith('55') && digits.length === 13 && digits[4] === '9') {
+      variants.add(`${digits.slice(0, 4)}${digits.slice(5)}`);
+      variants.add(digits.slice(2));
+      variants.add(`${digits.slice(2, 4)}${digits.slice(5)}`);
+    }
+    if (!digits.startsWith('55') && digits.length === 10) {
+      const withNine = `${digits.slice(0, 2)}9${digits.slice(2)}`;
+      variants.add(`55${digits}`);
+      variants.add(withNine);
+      variants.add(`55${withNine}`);
+    }
+    if (!digits.startsWith('55') && digits.length === 11 && digits[2] === '9') {
+      variants.add(`55${digits}`);
+      variants.add(`${digits.slice(0, 2)}${digits.slice(3)}`);
+      variants.add(`55${digits.slice(0, 2)}${digits.slice(3)}`);
+    }
+    return [...variants];
+  };
   const phonesMatch = (left, right) => {
-    const a = normalizePhoneForMatch(left);
-    const b = normalizePhoneForMatch(right);
-    if (!a || !b) return false;
-    return a === b || a.endsWith(b) || b.endsWith(a);
+    const leftVariants = phoneMatchVariants(left);
+    const rightVariants = phoneMatchVariants(right);
+    if (!leftVariants.length || !rightVariants.length) return false;
+    return leftVariants.some((a) => rightVariants.some((b) => a === b || a.endsWith(b) || b.endsWith(a)));
   };
 
   const findQualifiedDealForActiveThread = async () => {
@@ -235,18 +327,24 @@ export default function WhatsAppInbox() {
     return isUuid(data?.deal_id) ? data.deal_id : null;
   };
 
-  // [ELITE PERFORMANCE] Sincronizar o chat ativo sem loops de re-renderizaÃ§Ã£o
+  // [ELITE PERFORMANCE] Sincronizar o chat ativo sem loops de re-renderização
   useEffect(() => {
     if (activeChat && inbox) {
-      const updated = inbox.find(i => i.id === (activeChat.id || activeChat.chat_id));
+      const updated = inbox.find(i =>
+        (activeChat.thread_key && i.thread_key === activeChat.thread_key) ||
+        (activeChat.thread_id && i.thread_id === activeChat.thread_id) ||
+        (activeChat.contact_id && i.contact_id === activeChat.contact_id) ||
+        (!activeChat.contact_id && i.id === (activeChat.id || activeChat.chat_id))
+      );
       if (updated && (updated.last_message_at !== activeChat.last_message_at || updated.deal_id !== activeChat.deal_id)) {
         setActiveChat(updated);
       }
     }
-  }, [inbox]);
+  }, [activeChat, inbox]);
   
   const filteredInbox = sortedInbox?.filter(i => 
     i.contact_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    i.contact_phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     i.last_message?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -306,6 +404,11 @@ export default function WhatsAppInbox() {
 
     const messageChatId = String(message.chat_id || '');
     const messagePhone = message.sender_phone;
+    const messageContactId = message.contact_id;
+    const messageThreadId = message.thread_id;
+
+    if (activeThreadId && messageThreadId) return activeThreadId === messageThreadId;
+    if (activeChat?.contact_id && messageContactId && activeChat.contact_id !== messageContactId) return false;
 
     if (activeChatId && messageChatId && messageChatId === activeChatId) return true;
     if (activeChatPhone && messagePhone && phonesMatch(messagePhone, activeChatPhone)) return true;
@@ -320,7 +423,7 @@ export default function WhatsAppInbox() {
 
       return false;
     });
-  }, [activeChatId, activeChatPhone, activeThreadAliases]);
+  }, [activeThreadId, activeChat?.contact_id, activeChatId, activeChatPhone, activeThreadAliases]);
 
   const getReplyPreview = React.useCallback((message) => {
     if (!message) return null;
@@ -359,18 +462,25 @@ export default function WhatsAppInbox() {
     });
   }, [newMessage]);
 
-  // 1. Ouvir mudanÃ§as globais para atualizar a lista do Inbox
+  // 1. Ouvir mudanças globais para atualizar a lista do Inbox
   useEffect(() => {
-    const applyInboxMessage = (newMsg) => {
+    const applyInboxMessage = (newMsg, shouldCountUnread = false) => {
+      const isActiveChatMessage =
+        (newMsg.thread_id && activeThreadId && newMsg.thread_id === activeThreadId) ||
+        (newMsg.contact_id && activeChat?.contact_id && newMsg.contact_id === activeChat.contact_id) ||
+        (newMsg.chat_id && activeChatId && newMsg.chat_id === activeChatId) ||
+        (newMsg.sender_phone && activeChatPhone && phonesMatch(newMsg.sender_phone, activeChatPhone));
+
       setInbox(prev => {
         if (!prev) return prev;
 
-        const chatIdx = prev.findIndex(chat =>
-          chat.id === newMsg.chat_id ||
-          (newMsg.contact_id && chat.contact_id === newMsg.contact_id) ||
-          chat.thread_aliases?.includes(`chat:${newMsg.chat_id}`) ||
-          chat.thread_aliases?.includes(`phone:${newMsg.sender_phone}`)
-        );
+        const chatIdx = prev.findIndex(chat => {
+          if (newMsg.thread_id && chat.thread_id) return chat.thread_id === newMsg.thread_id;
+          if (newMsg.contact_id && chat.contact_id) return chat.contact_id === newMsg.contact_id;
+          if (chat.id === newMsg.chat_id) return true;
+          return chat.thread_aliases?.includes(`chat:${newMsg.chat_id}`) ||
+            chat.thread_aliases?.includes(`phone:${newMsg.sender_phone}`);
+        });
 
         if (chatIdx !== -1) {
           const updated = [...prev];
@@ -385,7 +495,27 @@ export default function WhatsAppInbox() {
             sender_type: shouldRefreshPreview ? newMsg.sender_type : updated[chatIdx].sender_type,
             deal_id: newMsg.deal_id || updated[chatIdx].deal_id
           };
+
+          const chatKey = getInboxChatKey(updated[chatIdx]);
+
+          if (shouldCountUnread && newMsg.sender_type === 'client' && !isActiveChatMessage && chatKey) {
+            setUnreadCounts((counts) => ({
+              ...counts,
+              [chatKey]: (counts[chatKey] || 0) + 1
+            }));
+          }
+
           return updated;
+        }
+
+        if (shouldCountUnread && newMsg.sender_type === 'client' && !isActiveChatMessage) {
+          const fallbackKey = newMsg.thread_id ? `thread:${newMsg.thread_id}` : (newMsg.chat_id || newMsg.contact_id);
+          if (fallbackKey) {
+            setUnreadCounts((counts) => ({
+              ...counts,
+              [fallbackKey]: (counts[fallbackKey] || 0) + 1
+            }));
+          }
         }
 
         refetchInbox();
@@ -396,14 +526,14 @@ export default function WhatsAppInbox() {
     const channel = supabase
       .channel('global-chat-inbox')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'deal_conversations' }, (payload) => {
-        if (payload.new) applyInboxMessage(payload.new);
+        if (payload.new) applyInboxMessage(payload.new, true);
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'deal_conversations' }, (payload) => {
-        if (payload.new) applyInboxMessage(payload.new);
+        if (payload.new) applyInboxMessage(payload.new, false);
       })
       .subscribe();
     return () => supabase.removeChannel(channel);
-  }, [refetchInbox]);
+  }, [activeChat?.contact_id, activeChatId, activeChatPhone, activeThreadId, getInboxChatKey, refetchInbox]);
 
   // 2. Buscar mensagens quando selecionar um chat (Suporte a Leads e Deals)
   useEffect(() => {
@@ -412,8 +542,10 @@ export default function WhatsAppInbox() {
       setReplyToMessage(null);
       loadMessages({
         dealId: activeDealId,
+        threadId: activeThreadId,
         phone: activeChatPhone,
         chatId: activeChatId,
+        contactId: activeChat?.contact_id,
         aliases: activeThreadAliases
       });
       
@@ -439,7 +571,7 @@ export default function WhatsAppInbox() {
                  return String(m.content || '').trim() === String(newMsg.content || '').trim();
                });
                if (alreadyExists) {
-                  // Se jÃ¡ existe (ex: acabou de ser enviado pessimamente), sÃ³ removemos a flag de otimismo se for o caso
+                  // Se já existe (ex: acabou de ser enviado pessimamente), só removemos a flag de otimismo se for o caso
                   return prev.map((m) => {
                     if (m.id === newMsg.id) return newMsg;
                     if (m.external_message_id && newMsg.external_message_id && m.external_message_id === newMsg.external_message_id) return newMsg;
@@ -486,13 +618,16 @@ export default function WhatsAppInbox() {
     } else {
       setMessages([]); // Limpar se nada estiver selecionado
     }
-  }, [activeDealId, activeChatPhone, activeChatId, activeThreadAliases, messageBelongsToActiveThread]);
+  }, [activeDealId, activeThreadId, activeChatPhone, activeChatId, activeChat?.contact_id, activeThreadAliases, messageBelongsToActiveThread]);
 
   async function loadMessages(context) {
     try {
       setIsLoadingMessages(true);
       const msgs = await getConversationsByContext(context);
-      setMessages(msgs);
+      setMessages(context.contactId
+        ? msgs.filter((message) => !message.contact_id || message.contact_id === context.contactId)
+        : msgs
+      );
     } catch (err) {
       console.error(err);
       setMessages([]);
@@ -539,7 +674,7 @@ export default function WhatsAppInbox() {
       await refetchInbox();
     } catch (err) {
       console.error('Erro ao vincular conversa ao pipeline:', err);
-      alert('O lead foi salvo, mas houve falha ao vincular o histÃ³rico da conversa. Recarregue a tela e tente novamente.');
+      alert('O lead foi salvo, mas houve falha ao vincular o histórico da conversa. Recarregue a tela e tente novamente.');
     }
   }
 
@@ -636,6 +771,7 @@ export default function WhatsAppInbox() {
     const optimisticMsg = {
       id: tempId,
       deal_id: activeDealId,
+      thread_id: activeThreadId,
       sender_phone: activeChatPhone,
       chat_id: activeChatId,
       content: content,
@@ -663,6 +799,7 @@ export default function WhatsAppInbox() {
       mediaUrl: null,
       messageType: 'text',
       options: {
+        threadId: activeThreadId,
         chatId: activeChatId,
         recipientPhone: activeRecipientId,
         senderPhone: activeSenderPhone,
@@ -674,7 +811,7 @@ export default function WhatsAppInbox() {
   };
 
   /**
-   * [ELITE UPLOAD] Faz o upload de mÃ­dia para o Supabase Storage e dispara via WhatsApp
+   * [ELITE UPLOAD] Faz o upload de mídia para o Supabase Storage e dispara via WhatsApp
    */
   /**
    * [ELITE AUDIO RECORDING] Gerenciamento do Gravador de Voz
@@ -706,7 +843,7 @@ export default function WhatsAppInbox() {
       }, 1000);
     } catch (err) {
       console.error("Erro ao acessar microfone:", err);
-      alert("NÃ£o foi possÃ­vel acessar o microfone. Verifique as permissÃµes do seu navegador.");
+      alert("Não foi possível acessar o microfone. Verifique as permissões do seu navegador.");
     }
   };
 
@@ -714,7 +851,7 @@ export default function WhatsAppInbox() {
     if (!mediaRecorderRef.current) return;
     
     if (!shouldSend) {
-      audioChunksRef.current = []; // Limpa os chunks para nÃ£o disparar o onstop com envio
+      audioChunksRef.current = []; // Limpa os chunks para não disparar o onstop com envio
     }
     
     mediaRecorderRef.current.stop();
@@ -743,6 +880,7 @@ export default function WhatsAppInbox() {
       setMessages(prev => [...prev, {
         id: tempId,
         deal_id: activeDealId,
+        thread_id: activeThreadId,
         sender_phone: activeChatPhone,
         chat_id: activeChatId,
         content: 'Mensagem de voz',
@@ -762,14 +900,15 @@ export default function WhatsAppInbox() {
         mediaUrl: publicUrl,
         messageType: 'audio',
         options: {
+          threadId: activeThreadId,
           chatId: activeChatId,
           recipientPhone: activeRecipientId,
           senderPhone: activeSenderPhone
         }
       });
     } catch (err) {
-      console.error('Erro ao enviar Ã¡udio:', err);
-      alert('Falha ao enviar Ã¡udio.');
+      console.error('Erro ao enviar áudio:', err);
+      alert('Falha ao enviar áudio.');
     } finally {
       setIsUploading(false);
     }
@@ -798,7 +937,7 @@ export default function WhatsAppInbox() {
 
       if (uploadError) throw uploadError;
 
-      // 2. Pegar URL pÃºblica (Garante que a Z-API consiga baixar)
+      // 2. Pegar URL pública (Garante que a Z-API consiga baixar)
       const { data: { publicUrl } } = supabase.storage
         .from('whatsapp_media')
         .getPublicUrl(filePath);
@@ -814,6 +953,7 @@ export default function WhatsAppInbox() {
       setMessages(prev => [...prev, {
         id: tempId,
         deal_id: activeDealId,
+        thread_id: activeThreadId,
         sender_phone: activeChatPhone,
         chat_id: activeChatId,
         content,
@@ -833,6 +973,7 @@ export default function WhatsAppInbox() {
         mediaUrl: publicUrl,
         messageType: type,
         options: {
+          threadId: activeThreadId,
           chatId: activeChatId,
           recipientPhone: activeRecipientId,
           senderPhone: activeSenderPhone
@@ -841,7 +982,7 @@ export default function WhatsAppInbox() {
       
     } catch (err) {
       console.error('Erro no upload/envio:', err);
-      alert('Falha ao enviar arquivo. Verifique se o bucket "whatsapp_media" existe e Ã© pÃºblico.');
+      alert('Falha ao enviar arquivo. Verifique se o bucket "whatsapp_media" existe e é público.');
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -859,16 +1000,16 @@ export default function WhatsAppInbox() {
 
       const aiResponse = functionData?.analysis;
       if (aiResponse) {
-        // [ATOMIC SYNC] Injetar anÃ¡lise direto na mensagem local
+        // [ATOMIC SYNC] Injetar análise direto na mensagem local
         setMessages(prev => prev.map(msg => 
           msg.id === convId ? { ...msg, metadata: { ...msg.metadata, ai_analysis: aiResponse } } : msg
         ));
       }
     } catch (err) {
       console.error('AI Analysis Trigger Failed:', err);
-      // [QUOTA UX] Alerta especÃ­fico para limites da conta
+      // [QUOTA UX] Alerta específico para limites da conta
       if (err.message?.includes('429') || err.message?.includes('Rate limit')) {
-        alert('OrÃ¡culo: Limite de velocidade da OpenAI atingido. Este plano permite poucas requisiÃ§Ãµes por minuto. Aguarde um pouco.');
+        alert('Oráculo: Limite de velocidade da OpenAI atingido. Este plano permite poucas requisições por minuto. Aguarde um pouco.');
       }
     } finally {
       setAnalyzingIds(prev => {
@@ -879,7 +1020,7 @@ export default function WhatsAppInbox() {
     }
   };
 
-  // [ELITE DIAGNOSTIC] Monitorar mudanÃ§as no chat ativo
+  // [ELITE DIAGNOSTIC] Monitorar mudanças no chat ativo
   useEffect(() => {
     if (activeChat) {
       console.log(`[Stitch Audit] Chat Ativo: ${activeChat.contact_name} | IA Insight:`, activeChat.ai_global_analysis?.diagnostic ? 'PRESENTE' : 'AUSENTE');
@@ -901,7 +1042,7 @@ export default function WhatsAppInbox() {
         throw new Error('Adicione este atendimento ao pipeline antes de rodar a analise Oracle. O sistema nao cria empresa ou negocio automaticamente.');
       }
 
-      console.log('[Stitch Oracle] Invocando CÃ©rebro Global...');
+      console.log('[Stitch Oracle] Invocando Cérebro Global...');
 
       currentDealId = await resolveDealIdForActiveThread(currentDealId);
       if (!currentDealId) {
@@ -912,7 +1053,7 @@ export default function WhatsAppInbox() {
         body: { deal_id: currentDealId, global: true }
       });
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Tempo limite atingido na anÃ¡lise. Tente novamente em alguns segundos.')), 45000);
+        setTimeout(() => reject(new Error('Tempo limite atingido na análise. Tente novamente em alguns segundos.')), 45000);
       });
       const { data: functionData, error: functionError } = await Promise.race([invokePromise, timeoutPromise]);
       
@@ -924,9 +1065,9 @@ export default function WhatsAppInbox() {
       
       console.log('[Stitch Oracle DEBUG] RESPOSTA BRUTA:', functionData);
       const aiResponse = functionData?.analysis || functionData; // Fallback se o objeto vier sem o wrapper
-      console.log('[Stitch Oracle] AnÃ¡lise Global Recebida:', aiResponse?.diagnostic ? 'SUCESSO (DiagnÃ³stico Presente)' : 'FALHA DE ESTRUTURA');
+      console.log('[Stitch Oracle] Análise Global Recebida:', aiResponse?.diagnostic ? 'SUCESSO (Diagnóstico Presente)' : 'FALHA DE ESTRUTURA');
 
-      // [ULTRA SYNC] Atualizar o inbox localmente COM O DADO DIRETO DA FUNÃ‡ÃƒO
+      // [ULTRA SYNC] Atualizar o inbox localmente COM O DADO DIRETO DA FUNÇÃO
       setInbox(prev => prev?.map(chat => 
         (chat.deal_id === currentDealId || chat.contact_phone === anchorPhone)
           ? { 
@@ -959,15 +1100,15 @@ export default function WhatsAppInbox() {
          }
       }, 1000);
     } catch (err) {
-      console.error('[Stitch Oracle] FALHA CRÃTICA:', err);
+      console.error('[Stitch Oracle] FALHA CRÍTICA:', err);
       
-      // [ELITE QUOTA UX] TraduÃ§Ã£o inteligente para o usuÃ¡rio
+      // [ELITE QUOTA UX] Tradução inteligente para o usuário
       if (err.message?.includes('429') || err.message?.includes('Rate limit')) {
-        alert('OrÃ¡culo: Limite de cota atingido (Sua conta OpenAI estÃ¡ no Tier 0: limite de 3 pedidos/min). Aguarde 60s ou adicione crÃ©ditos ($5) para liberar acesso total.');
+        alert('Oráculo: Limite de cota atingido (Sua conta OpenAI está no Tier 0: limite de 3 pedidos/min). Aguarde 60s ou adicione créditos ($5) para liberar acesso total.');
       } else if (err.message?.includes('insufficient_quota') || err.message?.includes('balance')) {
-        alert('OrÃ¡culo: Saldo insuficiente na OpenAI. Por favor, recarregue seus crÃ©ditos para continuar usando a inteligÃªncia.');
+        alert('Oráculo: Saldo insuficiente na OpenAI. Por favor, recarregue seus créditos para continuar usando a inteligência.');
       } else {
-        alert('OrÃ¡culo: ' + (err.message || 'Erro inesperado na anÃ¡lise global.'));
+        alert('Oráculo: ' + (err.message || 'Erro inesperado na análise global.'));
       }
     } finally {
       setIsGlobalAnalyzing(false);
@@ -977,7 +1118,7 @@ export default function WhatsAppInbox() {
   const handleDeleteChat = async () => {
     if (!activeChatId) return;
     
-    const confirmDelete = window.confirm(`Deseja realmente excluir TODA a conversa com ${activeChat.contact_name}? Esta aÃ§Ã£o nÃ£o pode ser desfeita.`);
+    const confirmDelete = window.confirm(`Deseja realmente excluir TODA a conversa com ${activeChat.contact_name}? Esta ação não pode ser desfeita.`);
     if (!confirmDelete) return;
 
     try {
@@ -993,7 +1134,7 @@ export default function WhatsAppInbox() {
       setActiveChat(null);
       setMessages([]);
       
-      console.log('[Stitch] Chat excluÃ­do com sucesso.');
+      console.log('[Stitch] Chat excluído com sucesso.');
     } catch (err) {
       alert('Erro ao excluir: ' + err.message);
     } finally {
@@ -1034,14 +1175,14 @@ export default function WhatsAppInbox() {
   };
 
   return (
-    <div className="relative z-0 flex flex-col gap-3 pb-8 pt-0 -mt-16 animate-in fade-in duration-700">
+    <div className="relative z-[60] -mx-4 flex flex-col gap-1.5 pb-5 pt-0 -mt-[124px] animate-in fade-in duration-700">
       <div className="pointer-events-none absolute -top-20 left-24 h-72 w-72 rounded-full bg-cyan-200/35 blur-3xl" />
       <div className="pointer-events-none absolute top-10 right-12 h-72 w-72 rounded-full bg-fuchsia-200/35 blur-3xl" />
 
-      <div className="relative flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-3xl font-black tracking-tight text-slate-950">Conversas</h1>
-          <p className="mt-1 text-sm font-semibold text-slate-700">
+      <div className="relative flex min-h-[38px] flex-col gap-2 px-4 lg:flex-row lg:items-center lg:justify-between lg:pr-[206px]">
+        <div className="min-w-0 max-w-[360px]">
+          <h1 className="text-xl font-black tracking-tight text-slate-950 leading-tight">Conversas</h1>
+          <p className="mt-0.5 text-[11px] font-semibold leading-tight text-slate-700">
             Central de atendimento WhatsApp com leitura em tempo real.
           </p>
         </div>
@@ -1057,7 +1198,7 @@ export default function WhatsAppInbox() {
             return (
               <div
                 key={metric.label}
-                className="flex items-center gap-2 rounded-full border border-white/70 bg-white/75 px-3.5 py-2 text-xs font-black uppercase tracking-[0.14em] text-slate-700 shadow-sm backdrop-blur-xl"
+                className="flex items-center gap-2 rounded-full border border-white/70 bg-white/75 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.14em] text-slate-700 shadow-sm backdrop-blur-xl"
               >
                 <Icon className="h-3.5 w-3.5 text-primary" />
                 <span className="text-slate-950">{metric.value}</span>
@@ -1065,52 +1206,47 @@ export default function WhatsAppInbox() {
               </div>
             );
           })}
-          <div className="flex items-center gap-2 rounded-full border border-emerald-200/70 bg-emerald-50/80 px-3.5 py-2 text-xs font-black uppercase tracking-[0.14em] text-emerald-700 shadow-sm backdrop-blur-xl">
+          <div className="flex items-center gap-2 rounded-full border border-emerald-200/70 bg-emerald-50/80 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.14em] text-emerald-700 shadow-sm backdrop-blur-xl">
             <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_14px_rgba(16,185,129,0.7)]" />
             Inbox ativo
           </div>
         </div>
       </div>
 
-      <div className="relative h-[calc(100vh-154px)] min-h-[686px] overflow-hidden rounded-[2.5rem] border border-white/70 bg-[linear-gradient(135deg,rgba(255,255,255,0.84),rgba(196,250,255,0.46),rgba(250,230,255,0.36))] shadow-[0_28px_85px_rgba(15,23,42,0.16)] backdrop-blur-2xl flex ring-1 ring-slate-900/5">
+      <div className="relative h-[calc(100vh-62px)] min-h-[686px] overflow-hidden rounded-[1.5rem] border border-white/70 bg-[linear-gradient(135deg,rgba(255,255,255,0.84),rgba(196,250,255,0.46),rgba(250,230,255,0.36))] shadow-[0_18px_48px_rgba(15,23,42,0.12)] backdrop-blur-2xl flex ring-1 ring-slate-900/5">
       
-      {/* ðŸ“± LISTA DE CONVERSAS (Sidebar Esquerda) */}
+      {/* 📱 LISTA DE CONVERSAS (Sidebar Esquerda) */}
       <div className={cn(
-        "w-full md:w-[420px] border-r border-white/60 flex flex-col bg-white/55 backdrop-blur-2xl",
+        "w-full md:w-[390px] border-r border-white/60 flex flex-col bg-white/55 backdrop-blur-2xl",
         (activeDealId || activeChatPhone) && "hidden md:flex"
       )}>
-        <div className="p-8 space-y-6 border-b border-white/60 bg-white/35">
-          <div className="flex justify-between items-center">
-            <div>
-              <h2 className="text-3xl font-black tracking-tight text-slate-950">Mensagens</h2>
-              <p className="text-sm font-bold text-slate-600 mt-1">Atendimentos WhatsApp em tempo real</p>
+        <div className="px-4 py-3 border-b border-white/60 bg-white/35">
+          <div className="flex justify-between items-center gap-2">
+            <div className="relative group flex-1">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600 group-focus-within:text-primary transition-colors" />
+              <input
+                type="text"
+                placeholder="Buscar chats ou mensagens..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-3 py-2.5 bg-white/85 border border-slate-300 rounded-xl text-sm text-slate-900 placeholder:text-slate-500 font-semibold focus:outline-none focus:ring-4 focus:ring-primary/10 transition-all shadow-sm"
+              />
             </div>
-            <button className="p-3 hover:bg-white rounded-2xl text-slate-700 transition-all border border-white/60 shadow-sm">
-              <Filter className="w-5 h-5" />
+            <button className="p-2.5 hover:bg-white rounded-xl text-slate-700 transition-all border border-white/60 shadow-sm">
+              <Filter className="w-4 h-4" />
             </button>
-          </div>
-          
-          <div className="relative group">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-600 group-focus-within:text-primary transition-colors" />
-            <input 
-              type="text"
-              placeholder="Buscar chats ou mensagens..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-12 pr-4 py-4 bg-white/85 border border-slate-300 rounded-2xl text-base text-slate-900 placeholder:text-slate-500 font-semibold focus:outline-none focus:ring-4 focus:ring-primary/10 transition-all shadow-sm"
-            />
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-3 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5 custom-scrollbar">
           {loadingInbox ? (
             <div className="py-20 flex justify-center"><LoadingSpinner /></div>
           ) : filteredInbox?.length === 0 ? (
             <div className="py-20 text-center text-slate-600 italic text-base font-semibold">Nenhuma conversa encontrada</div>
           ) : filteredInbox?.map((chat, idx) => {
             // [Elite Fix] Unique Key
-            const chatKey = chat.id;
-            const isActive = activeChatId === chat.id;
+            const chatKey = chat.thread_key || chat.id;
+            const isActive = activeThreadKey === chatKey;
             
             return (
               <button 
@@ -1118,56 +1254,70 @@ export default function WhatsAppInbox() {
                 onClick={() => {
                   pendingInitialScrollRef.current = true;
                   setActiveChat(chat);
+                  setUnreadCounts((counts) => {
+                    const next = { ...counts };
+                    delete next[chatKey];
+                    return next;
+                  });
                   setMessages([]); // Limpeza visual imediata
                 }}
                 className={cn(
-                  "w-full p-5 rounded-[2rem] flex gap-4 transition-all duration-300 items-start text-left group border",
+                  "w-full p-3.5 rounded-2xl flex gap-3 transition-all duration-300 items-start text-left group border",
                   isActive 
-                    ? "bg-white shadow-xl shadow-slate-200/60 border-primary/20 ring-4 ring-primary/5" 
-                    : "bg-white/45 border-white/50 hover:bg-white/85 hover:shadow-lg"
+                    ? "bg-white shadow-lg shadow-slate-200/50 border-primary/20 ring-2 ring-primary/5" 
+                    : "bg-white/45 border-white/50 hover:bg-white/85 hover:shadow-md"
                 )}
               >
                 <div className="relative">
-                  <div className="w-14 h-14 rounded-2xl bg-slate-100 border border-white/80 flex items-center justify-center text-slate-700 font-black overflow-hidden shadow-sm">
-                     {chat.is_group ? <Users className="w-6 h-6" /> : (chat.contact_name?.[0]?.toUpperCase() || <User />)}
+                  <div className="w-11 h-11 rounded-xl bg-slate-100 border border-white/80 flex items-center justify-center text-slate-700 font-black overflow-hidden shadow-sm">
+                     {chat.is_group ? <Users className="w-5 h-5" /> : (chat.contact_name?.[0]?.toUpperCase() || <User />)}
                   </div>
                   <div className={cn(
-                    "absolute bottom-0 right-0 w-4 h-4 border-2 border-white rounded-full shadow-sm",
+                    "absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 border-2 border-white rounded-full shadow-sm",
                     chat.is_group ? "bg-primary" : "bg-emerald-500"
                   )} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-start mb-1">
-                    <h4 className="font-black text-slate-950 truncate text-lg">{chat.contact_name}</h4>
-                    <span className="text-sm text-slate-700 font-bold whitespace-nowrap">
-                      {chat.last_message_at ? formatRelative(new Date(chat.last_message_at), new Date(), { locale: ptBR }) : ''}
-                    </span>
+                  <div className="flex justify-between items-start mb-0.5 gap-2">
+                    <div className="min-w-0">
+                      <h4 className="font-black text-slate-950 truncate text-base">{chat.contact_name}</h4>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className="text-xs text-slate-700 font-bold whitespace-nowrap">
+                        {chat.last_message_at ? formatRelative(new Date(chat.last_message_at), new Date(), { locale: ptBR }) : ''}
+                      </span>
+                      {unreadCounts[chatKey] > 0 && (
+                        <span className="min-w-5 h-5 px-1.5 rounded-full bg-emerald-500 text-white text-[11px] font-black flex items-center justify-center shadow-sm">
+                          {unreadCounts[chatKey] > 99 ? '99+' : unreadCounts[chatKey]}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <p className={cn(
-                    "text-base truncate transition-colors font-semibold",
+                    "text-sm truncate transition-colors font-semibold",
                     chat.sender_type === 'user' ? "text-slate-600" : "text-slate-700"
                   )}>
-                    {chat.sender_type === 'user' && 'VocÃª: '}
+                    {chat.sender_type === 'user' && 'Você: '}
                     {chat.last_message}
                   </p>
-                  <div className="mt-2 flex items-center gap-2">
-                      <span className="text-[11px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full bg-slate-100 text-slate-700">
+                  <div className="mt-1.5 flex items-center gap-1.5">
+                      <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">
                         {chat.deal_title}
                       </span>
                       {chat.is_group && (
-                         <span className="text-[11px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full bg-blue-100 text-blue-700">
+                         <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">
                            Grupo
                          </span>
                       )}
                       {!chat.is_qualified ? (
                         <span className={cn(
-                          "text-[11px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full",
+                          "text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full",
                           chat.contact_is_auto ? "bg-amber-100 text-amber-600 animate-pulse" : "bg-slate-200 text-slate-600"
                         )}>
-                          {chat.contact_is_auto ? 'Novo Lead' : 'NÃ£o Qualificado'}
+                          {chat.contact_is_auto ? 'Novo Lead' : 'Não Qualificado'}
                         </span>
                       ) : (
-                        <span className="text-[11px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full bg-primary/10 text-primary">
+                        <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-primary/10 text-primary">
                           {chat.stage_label}
                         </span>
                       )}
@@ -1179,7 +1329,7 @@ export default function WhatsAppInbox() {
         </div>
       </div>
 
-      {/* ðŸ’¬ JANELA DE CHAT (Direita) */}
+      {/* 💬 JANELA DE CHAT (Direita) */}
           <div className={cn(
         "flex-1 flex flex-col bg-white/20 relative",
         !activeChat && "hidden md:flex items-center justify-center"
@@ -1187,31 +1337,38 @@ export default function WhatsAppInbox() {
         {activeChat ? (
           <>
             {/* Header do Chat */}
-            <div className="p-6 border-b border-white/60 bg-white/65 backdrop-blur-2xl flex justify-between items-center z-10 box-decoration-clone shadow-sm">
-              <div className="flex items-center gap-4">
+            <div className="px-4 py-2 border-b border-white/60 bg-white/65 backdrop-blur-2xl flex justify-between items-center z-10 box-decoration-clone shadow-sm">
+              <div className="flex items-center gap-2.5">
                 <button onClick={() => setActiveChat(null)} className="md:hidden p-2 text-slate-700"><ArrowLeft /></button>
-                <div className="w-14 h-14 rounded-2xl bg-slate-100 border border-white/80 flex items-center justify-center font-black text-slate-700 shadow-sm overflow-hidden">
+                <div className="w-9 h-9 rounded-lg bg-slate-100 border border-white/80 flex items-center justify-center font-black text-slate-700 shadow-sm overflow-hidden text-sm">
                    {activeChat.contact_name?.[0]}
                 </div>
                 <div>
-                  <h3 className="font-black text-slate-950 tracking-tight text-lg">{activeChat.contact_name}</h3>
-                  <div className="flex items-center gap-2">
-                     <div className={cn("w-2 h-2 rounded-full animate-pulse", activeChat.is_group ? "bg-primary" : "bg-emerald-500")} />
-                     <p className="text-sm text-slate-700 font-black uppercase tracking-widest flex items-center gap-2">
-                        {activeChat.is_group ? 'Grupo WhatsApp' : 'WhatsApp Online'}
+                  <h3 className="font-black text-slate-950 tracking-tight text-sm leading-tight">{activeChat.contact_name}</h3>
+                  {formatDisplayPhone(activeChat.contact_phone) && (
+                    <p className="text-[11px] text-slate-500 font-bold leading-tight">
+                      {formatDisplayPhone(activeChat.contact_phone)}
+                    </p>
+                  )}
+                  <div className="flex items-center gap-1.5">
+                     <div
+                       title={activeChat.is_group ? 'Grupo ativo' : 'Online'}
+                       className={cn("w-2 h-2 rounded-full animate-pulse shrink-0", activeChat.is_group ? "bg-primary" : "bg-emerald-500")}
+                     />
+                     <p className="text-[11px] text-slate-700 font-black uppercase tracking-widest flex items-center gap-1.5">
                         {!activeChat.is_qualified ? (
-                          <span className={cn("ml-2 font-black", activeChat.contact_is_auto ? "text-amber-600" : "text-slate-700")}>
-                            â€¢ {activeChat.contact_is_auto ? 'Novo Lead' : 'Lead NÃ£o Qualificado'}
+                          <span className={cn("font-black", activeChat.contact_is_auto ? "text-amber-600" : "text-slate-700")}>
+                            {activeChat.contact_is_auto ? 'Novo Lead' : 'Lead Não Qualificado'}
                           </span>
                         ) : (
-                          <span className="ml-2 text-primary font-black">â€¢ {activeChat.stage_label}</span>
+                          <span className="text-primary font-black">{activeChat.stage_label}</span>
                         )}
                      </p>
                   </div>
                 </div>
               </div>
-              <div className="flex gap-2 items-center">
-                {/* âš¡ STATUS BADGE (ELITE FEEDBACK) */}
+              <div className="flex gap-1 items-center">
+                {/* ⚡ STATUS BADGE (ELITE FEEDBACK) */}
                 {isGlobalAnalyzing && (
                   <div className="mr-2 px-3 py-1 bg-primary/10 border border-primary/20 rounded-full flex items-center gap-2 animate-pulse">
                     <div className="w-2 h-2 bg-primary rounded-full" />
@@ -1219,13 +1376,13 @@ export default function WhatsAppInbox() {
                   </div>
                 )}
 
-                {/* âš¡ BOTÃƒO GLOBAL ORACLE BOLT */}
+                {/* ⚡ BOTÃO GLOBAL ORACLE BOLT */}
                 <button 
                   onClick={handleGlobalAnalyze}
                   disabled={isGlobalAnalyzing}
-                  title="AnÃ¡lise Global 360Â° (Oracle)"
+                  title="Análise Global 360° (Oracle)"
                   className={cn(
-                    "relative w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-700 group",
+                    "relative w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-700 group",
                     isGlobalAnalyzing 
                       ? "bg-primary text-white scale-110 shadow-[0_0_40px_rgba(59,130,246,0.6)]" 
                       : "bg-white border border-slate-200 text-primary hover:border-primary hover:shadow-xl hover:shadow-primary/10"
@@ -1235,7 +1392,7 @@ export default function WhatsAppInbox() {
                     <LoadingSpinner size="xs" />
                   ) : (
                     <>
-                      <span className="material-symbols-outlined text-[18px]">bolt</span>
+                      <span className="material-symbols-outlined text-[16px]">bolt</span>
                       {/* Glow Pulse Effect */}
                       <span className="absolute inset-0 bg-primary/20 animate-ping opacity-0 group-hover:opacity-100 rounded-full" />
                       <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/40 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
@@ -1243,30 +1400,37 @@ export default function WhatsAppInbox() {
                   )}
                 </button>
 
-                <div className="h-8 w-px bg-slate-200 mx-2" />
-
                 {canQualifyActiveChat && (
                   <button 
                     onClick={() => setIsQualifying(true)}
-                    className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg shadow-primary/20"
+                    className="flex items-center gap-1.5 px-3 py-2 bg-primary text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-md shadow-primary/20"
                   >
-                    <Rocket className="w-3.5 h-3.5" />
+                    <Rocket className="w-3 h-3" />
                     Adicionar ao Pipeline
                   </button>
                 )}
-                <div className="h-8 w-px bg-slate-200 mx-2" />
-                <button className="p-3 hover:bg-white rounded-2xl text-slate-700 transition-colors border border-white/50"><Phone className="w-5 h-5" /></button>
+
+                <button 
+                  onClick={() => setShowFlowModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-[10px] font-black uppercase tracking-widest hover:border-primary hover:text-primary transition-all shadow-sm"
+                >
+                  <Play className="w-3 h-3" />
+                  Fluxos
+                </button>
+
+                <div className="h-6 w-px bg-slate-200 mx-1" />
+                <button className="p-2 hover:bg-white rounded-lg text-slate-700 transition-colors border border-white/50"><Phone className="w-3.5 h-3.5" /></button>
                 
-                {/* ðŸ”´ MENU DE OPÃ‡Ã•ES (DELETE) */}
+                {/* 🔴 MENU DE OPÇÕES (DELETE) */}
                 <div className="relative">
                   <button 
                     onClick={() => setShowChatMenu(!showChatMenu)}
                     className={cn(
-                      "p-3 rounded-2xl transition-all duration-300",
+                      "p-2 rounded-lg transition-all duration-300",
                       showChatMenu ? "bg-white text-slate-900" : "text-slate-700 hover:bg-white"
                     )}
                   >
-                    <MoreVertical className="w-5 h-5" />
+                    <MoreVertical className="w-3.5 h-3.5" />
                   </button>
 
                   <AnimatePresence>
@@ -1316,17 +1480,17 @@ export default function WhatsAppInbox() {
             {/* Mensagens */}
             <div 
               ref={scrollRef}
-              className="flex-1 overflow-y-auto p-10 space-y-6 custom-scrollbar scroll-smooth bg-[linear-gradient(180deg,rgba(255,255,255,0.20),rgba(240,249,255,0.18),rgba(250,245,255,0.18))]"
+              className="flex-1 overflow-y-auto px-5 py-3.5 space-y-2.5 custom-scrollbar scroll-smooth bg-[linear-gradient(180deg,rgba(255,255,255,0.20),rgba(240,249,255,0.18),rgba(250,245,255,0.18))]"
             >
-              <div className="flex flex-col items-center py-8">
-                 <span className="px-5 py-2 rounded-full bg-white/90 text-sm font-black text-slate-700 uppercase tracking-widest shadow-sm mb-4 border border-white/70">
-                   InÃ­cio da Conversa â€” {activeChat.deal_title}
+              <div className="flex flex-col items-center py-2">
+                 <span className="px-3 py-1 rounded-full bg-white/90 text-[10px] font-black text-slate-700 uppercase tracking-widest shadow-sm mb-1 border border-white/70">
+                   Início da Conversa — {activeChat.deal_title}
                  </span>
               </div>
 
               {!isLoadingMessages && displayedMessages.length === 0 ? (
-                <div className="flex justify-center py-10">
-                  <div className="px-6 py-4 rounded-3xl bg-white/80 border border-white/70 shadow-sm text-sm font-bold text-slate-500">
+                <div className="flex justify-center py-6">
+                  <div className="px-4 py-3 rounded-2xl bg-white/80 border border-white/70 shadow-sm text-sm font-bold text-slate-500">
                     Nenhuma mensagem encontrada neste atendimento.
                   </div>
                 </div>
@@ -1347,11 +1511,11 @@ export default function WhatsAppInbox() {
                   <div key={msg.id} className="w-full">
                     <div 
                       className={cn(
-                        "flex flex-col max-w-[80%] animate-in slide-in-from-bottom-2 duration-300 relative",
+                        "flex flex-col max-w-[70%] animate-in slide-in-from-bottom-2 duration-300 relative",
                         isMe ? "ml-auto items-end" : "items-start"
                       )}
                     >
-                      {/* BotÃ£o Oracle (Bolt) Elite - Refined Position */}
+                      {/* Botão Oracle (Bolt) Elite - Refined Position */}
                       {!isMe && (
                         <button 
                           onClick={() => handleAnalyzeConversation(msg.id)}
@@ -1359,17 +1523,17 @@ export default function WhatsAppInbox() {
                             "absolute -right-9 top-8 w-7 h-7 bg-white/90 backdrop-blur-md rounded-full shadow-sm border border-white/70 text-primary flex items-center justify-center transition-all hover:scale-110 hover:bg-white hover:shadow-md active:scale-90 z-20",
                             analyzingIds.has(msg.id) ? "opacity-100" : "opacity-0 group-hover/bubble:opacity-90"
                           )}
-                          title="AnÃ¡lise estratÃ©gica do Oracle"
+                          title="Análise estratégica do Oracle"
                         >
                           <span className={cn("material-symbols-outlined text-[14px]", analyzingIds.has(msg.id) && "animate-spin")}>bolt</span>
                         </button>
                       )}
 
                       <div className={cn(
-                        "relative group/bubble px-7 py-5 rounded-[2rem] text-lg font-semibold shadow-md transition-all border leading-relaxed",
+                        "relative group/bubble px-3.5 py-2 rounded-xl text-base font-semibold shadow-sm transition-all border leading-snug",
                         isMe 
-                          ? "bg-primary text-white border-primary/20 rounded-tr-sm shadow-primary/20" 
-                          : "bg-white/95 text-slate-800 border-white/80 rounded-tl-sm hover:shadow-lg",
+                          ? "bg-primary text-white border-primary/20 rounded-tr-[3px] shadow-primary/15" 
+                          : "bg-white/95 text-slate-800 border-white/80 rounded-tl-[3px] hover:shadow-md",
                         msg.is_optimistic && "opacity-70 animate-pulse"
                       )}>
                         <button
@@ -1387,10 +1551,10 @@ export default function WhatsAppInbox() {
 
                         {replyMeta && (
                           <div className={cn(
-                            "mb-3 rounded-2xl border-l-4 px-4 py-3 text-sm",
+                            "mb-2 rounded-xl border-l-4 px-3 py-2 text-sm",
                             isMe ? "bg-white/10 border-white/70 text-white/90" : "bg-slate-50 border-primary/70 text-slate-700"
                           )}>
-                            <p className={cn("text-[10px] font-black uppercase tracking-widest mb-1", isMe ? "text-white/70" : "text-primary")}>
+                            <p className={cn("text-[9px] font-black uppercase tracking-widest mb-0.5", isMe ? "text-white/70" : "text-primary")}>
                               Respondendo {replyMeta.sender}
                             </p>
                             <p className="font-bold leading-snug line-clamp-3">
@@ -1400,13 +1564,13 @@ export default function WhatsAppInbox() {
                         )}
                         
                         
-                        {/* ðŸ–¼ï¸ RENDERIZADOR MULTIMÃDIA ELITE (v8.0) */}
+                        {/* 🖼️ RENDERIZADOR MULTIMÍDIA ELITE (v8.0) */}
                         {msg.message_type === 'image' && msg.media_url && (
-                          <div className="mb-3 -mx-2 -mt-1 overflow-hidden rounded-[1.5rem] border border-slate-100 shadow-inner bg-slate-50 flex justify-center">
+                          <div className="mb-1.5 -mx-1 -mt-0.5 overflow-hidden rounded-lg border border-slate-100 shadow-inner bg-slate-50 flex justify-center">
                             <img 
                               src={msg.media_url} 
                               alt="WhatsApp" 
-                              className="max-w-[350px] max-h-[400px] w-auto h-auto object-contain hover:scale-105 transition-transform duration-500 cursor-zoom-in rounded-[1rem]"
+                              className="max-w-[300px] max-h-[340px] w-auto h-auto object-contain hover:scale-105 transition-transform duration-500 cursor-zoom-in rounded-lg"
                               onClick={() => window.open(msg.media_url, '_blank')}
                             />
                           </div>
@@ -1414,14 +1578,14 @@ export default function WhatsAppInbox() {
                         
                         {msg.message_type === 'audio' && msg.media_url && (
                           <div className={cn(
-                            "mb-3 p-4 rounded-3xl flex items-center gap-4 min-w-[240px]",
+                            "mb-1.5 p-2.5 rounded-xl flex items-center gap-2.5 min-w-[200px]",
                             isMe ? "bg-white/10" : "bg-slate-50 border border-slate-100"
                           )}>
                             <div className={cn(
-                              "w-10 h-10 rounded-full flex items-center justify-center shadow-lg",
+                              "w-8 h-8 rounded-full flex items-center justify-center shadow-md",
                               isMe ? "bg-white text-primary" : "bg-primary text-white"
                             )}>
-                              <Mic className="w-5 h-5" />
+                              <Mic className="w-4 h-4" />
                             </div>
                             <div className="flex-1">
                                <p className={cn("text-xs font-black uppercase tracking-widest mb-1", isMe ? "text-white/70" : "text-slate-600")}>Mensagem de Voz</p>
@@ -1458,8 +1622,8 @@ export default function WhatsAppInbox() {
                         )}
 
                         <div className={cn(
-                          "leading-relaxed whitespace-pre-wrap break-words",
-                          msg.message_type !== 'text' && "mt-3 pt-3 border-t font-semibold text-base",
+                          "leading-snug whitespace-pre-wrap break-words",
+                          msg.message_type !== 'text' && "mt-2 pt-2 border-t font-semibold text-base",
                           msg.message_type !== 'text' && (isMe ? "border-white/10 text-white/95 italic" : "border-slate-100 text-slate-700 italic")
                         )}>
                           {msg.content}
@@ -1467,7 +1631,7 @@ export default function WhatsAppInbox() {
 
                         {sendStatus && (
                           <div className={cn(
-                            "mt-3 pt-2 border-t text-[10px] font-black uppercase tracking-[0.18em]",
+                            "mt-2 pt-1.5 border-t text-[9px] font-black uppercase tracking-[0.18em]",
                             sendStatus === 'failed'
                               ? "border-red-200 text-red-100"
                               : isMe
@@ -1481,13 +1645,13 @@ export default function WhatsAppInbox() {
                         )}
                       </div>
 
-                      <span className="text-[11px] text-slate-600 mt-2 font-black uppercase tracking-[0.12em] px-4">
-                        {isMe ? 'VocÃª' : 'Cliente'} â€¢ {msg.created_at ? formatRelative(new Date(msg.created_at), new Date(), { locale: ptBR }) : 'Agora'}
-                        {msg.metadata?.is_edited ? ' â€¢ Editada' : ''}
+                      <span className="text-[9px] text-slate-600 mt-1 font-black uppercase tracking-[0.12em] px-2">
+                        {isMe ? 'Você' : 'Cliente'} • {msg.created_at ? formatRelative(new Date(msg.created_at), new Date(), { locale: ptBR }) : 'Agora'}
+                        {msg.metadata?.is_edited ? ' • Editada' : ''}
                       </span>
                     </div>
 
-                    {/* ðŸ§  ORACLE INSIGHT CARD (Implementation v7.5) */}
+                    {/* 🧠 ORACLE INSIGHT CARD (Implementation v7.5) */}
                     <AnimatePresence>
                       {hasAI && (
                         <motion.div 
@@ -1507,7 +1671,7 @@ export default function WhatsAppInbox() {
                                 </div>
                                 <div>
                                   <h5 className="text-[11px] font-black uppercase tracking-[0.25em] text-primary">Oracle Highlight</h5>
-                                  <p className="text-[10px] font-bold text-slate-400">Decision Intelligence â€¢ {msg.metadata.ai_analysis.strategy_category}</p>
+                                  <p className="text-[10px] font-bold text-slate-400">Decision Intelligence • {msg.metadata.ai_analysis.strategy_category}</p>
                                 </div>
                               </div>
                               
@@ -1529,7 +1693,7 @@ export default function WhatsAppInbox() {
                               </div>
 
                               <div className="space-y-3">
-                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 pl-2">AÃ§Ã£o Sugerida pelo Oracle</span>
+                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 pl-2">Ação Sugerida pelo Oracle</span>
                                 <div className="bg-primary/5 p-6 rounded-[2rem] border border-primary/10 group/msg relative transition-all hover:bg-primary/10">
                                   <p className="text-sm font-manrope font-bold text-slate-800 leading-tight mb-4">
                                     {msg.metadata.ai_analysis.recommended_action?.suggested_message}
@@ -1539,7 +1703,7 @@ export default function WhatsAppInbox() {
                                     className="w-full py-4 bg-primary text-white rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all"
                                   >
                                     <span className="material-symbols-outlined text-base">auto_fix_high</span>
-                                    Aplicar SugestÃ£o no Chat
+                                    Aplicar Sugestão no Chat
                                   </button>
                                 </div>
                               </div>
@@ -1555,7 +1719,7 @@ export default function WhatsAppInbox() {
             </div>
 
             {/* Input de Mensagem */}
-            <div className="p-7 bg-white/55 border-t border-white/60 backdrop-blur-2xl">
+            <div className="px-4 py-3 bg-white/55 border-t border-white/60 backdrop-blur-2xl">
               {replyToMessage && (
                 <div className="mb-3 mx-2 rounded-2xl bg-white/90 border border-primary/15 border-l-4 border-l-primary px-5 py-3 shadow-sm flex items-start justify-between gap-4">
                   <div className="min-w-0">
@@ -1577,7 +1741,7 @@ export default function WhatsAppInbox() {
                 </div>
               )}
               <div className={cn(
-                "relative flex items-center gap-4 bg-white/95 p-2 rounded-[2.5rem] shadow-2xl border border-white/80 transition-all",
+                "relative flex items-center gap-2.5 bg-white/95 p-1.5 rounded-xl shadow-lg border border-white/80 transition-all",
                 isRecording ? " ring-4 ring-red-500/10 border-red-100" : "focus-within:ring-4 ring-primary/5"
               )}>
                 <input 
@@ -1642,22 +1806,22 @@ export default function WhatsAppInbox() {
                       onClick={() => fileInputRef.current?.click()}
                       disabled={isUploading || isRecording}
                       className={cn(
-                        "p-3 rounded-full transition-all text-slate-700 hover:bg-slate-50 hover:text-primary disabled:opacity-30"
+                        "p-2 rounded-lg transition-all text-slate-700 hover:bg-slate-50 hover:text-primary disabled:opacity-30"
                       )}
                     >
-                      <Paperclip className="w-6 h-6" />
+                      <Paperclip className="w-5 h-5" />
                     </button>
 
                     <button
                       type="button"
                       onClick={() => setShowEmojiPicker(prev => !prev)}
                       className={cn(
-                        "p-3 rounded-full transition-all text-slate-700 hover:bg-slate-50 hover:text-primary",
+                        "p-2 rounded-lg transition-all text-slate-700 hover:bg-slate-50 hover:text-primary",
                         showEmojiPicker && "bg-primary/10 text-primary"
                       )}
                       title="Enviar emoji"
                     >
-                      <Smile className="w-6 h-6" />
+                      <Smile className="w-5 h-5" />
                     </button>
 
                     <input 
@@ -1672,23 +1836,23 @@ export default function WhatsAppInbox() {
                         }
                       }}
                       placeholder="Escreva sua resposta..."
-                      className="flex-1 bg-transparent py-4 text-lg focus:outline-none text-slate-900 placeholder:text-slate-500 font-semibold"
+                      className="flex-1 bg-transparent py-2.5 text-base focus:outline-none text-slate-900 placeholder:text-slate-500 font-semibold"
                     />
 
-                    {/* BotÃ£o de Gravar Ãudio */}
+                    {/* Botão de Gravar Áudio */}
                     <button 
                       type="button"
                       onClick={handleStartRecording}
-                      className="p-3 text-slate-700 hover:bg-slate-50 hover:text-red-500 transition-all"
+                      className="p-2 text-slate-700 hover:bg-slate-50 hover:text-red-500 transition-all rounded-lg"
                     >
-                      <Mic className="w-6 h-6" />
+                      <Mic className="w-5 h-5" />
                     </button>
 
                     <button 
                       type="button"
                       onClick={handleSendMessage}
                       disabled={isUploading || !newMessage.trim()}
-                      className="px-8 py-4 bg-primary text-white rounded-[2rem] font-black text-sm uppercase tracking-widest flex items-center gap-2 hover:bg-primary-container transition-all shadow-xl shadow-primary/20 active:scale-95 disabled:opacity-50"
+                      className="px-5 py-2.5 bg-primary text-white rounded-xl font-black text-xs uppercase tracking-widest flex items-center gap-2 hover:bg-primary-container transition-all shadow-lg shadow-primary/20 active:scale-95 disabled:opacity-50"
                     >
                       {isSending && !newMessage.trim()
                         ? <LoadingSpinner size="sm" />
@@ -1711,7 +1875,7 @@ export default function WhatsAppInbox() {
                       <button 
                         onClick={() => handleStopRecording(false)}
                         className="p-3 text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all rounded-full"
-                        title="Cancelar GravaÃ§Ã£o"
+                        title="Cancelar Gravação"
                       >
                         <Trash2 className="w-5 h-5" />
                       </button>
@@ -1814,7 +1978,7 @@ export default function WhatsAppInbox() {
         )}
       </Modal>
 
-      {/* ðŸš€ MODAL DE QUALIFICAÃ‡ÃƒO (DealForm Reutilizado) */}
+      {/* 🚀 MODAL DE QUALIFICAÇÃO (DealForm Reutilizado) */}
       <Modal
         isOpen={isQualifying}
         onClose={() => setIsQualifying(false)}
@@ -1834,14 +1998,14 @@ export default function WhatsAppInbox() {
               className="px-10 py-3 rounded-2xl bg-primary hover:bg-primary-container text-white font-black text-xs uppercase tracking-widest shadow-2xl shadow-primary/20 transition-all active:scale-95 flex items-center gap-2"
             >
               <CheckCircle2 className="w-4 h-4" />
-              Finalizar QualificaÃ§Ã£o
+              Finalizar Qualificação
             </button>
           </div>
         }
       >
         <div className="p-2">
             <p className="text-sm text-slate-500 mb-8 font-medium">
-              Transforme este contato de WhatsApp em um negÃ³cio oficial do seu funil. Preencha os detalhes da oportunidade abaixo.
+              Transforme este contato de WhatsApp em um negócio oficial do seu funil. Preencha os detalhes da oportunidade abaixo.
             </p>
             <DealForm 
               initialData={{
@@ -1855,6 +2019,56 @@ export default function WhatsAppInbox() {
               onSuccess={handleQualifySuccess}
               onCancel={() => setIsQualifying(false)}
             />
+        </div>
+      </Modal>
+
+      {/* [FLOW SELECTION MODAL v1.1] */}
+      <Modal
+        isOpen={showFlowModal}
+        onClose={() => setShowFlowModal(false)}
+        title="Iniciar Fluxo de Automação"
+        size="md"
+      >
+        <div className="space-y-6">
+          <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl">
+            <p className="text-sm text-blue-800 font-semibold leading-relaxed">
+              Selecione um fluxo para ativar para <span className="font-black">{activeChat?.contact_name}</span>. 
+              Assim que iniciado, o sistema assumirá a conversa automaticamente.
+            </p>
+          </div>
+
+          <div className="grid gap-3">
+            {flows.length === 0 ? (
+              <div className="py-12 text-center">
+                <p className="text-slate-500 font-bold">Nenhum fluxo ativo encontrado.</p>
+                <p className="text-xs text-slate-400 mt-1">Crie e ative um fluxo no Flow Builder primeiro.</p>
+              </div>
+            ) : flows.map(flow => (
+              <button
+                key={flow.id}
+                onClick={() => handleStartFlow(flow.id)}
+                disabled={isStartingFlow}
+                className="w-full p-5 rounded-2xl border border-slate-200 bg-white hover:border-primary hover:bg-primary/5 transition-all text-left group flex items-center justify-between"
+              >
+                <div>
+                  <h4 className="font-black text-slate-900 group-hover:text-primary transition-colors">{flow.name}</h4>
+                  <p className="text-sm text-slate-500 font-semibold mt-1">{flow.category} • {flow.description || 'Sem descrição'}</p>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-primary group-hover:text-white transition-all">
+                  <Play className="w-5 h-5 fill-current" />
+                </div>
+              </button>
+            ))}
+          </div>
+
+          <div className="pt-4 border-t border-slate-100 flex justify-end">
+            <button
+              onClick={() => setShowFlowModal(false)}
+              className="px-6 py-3 text-slate-600 font-black uppercase text-xs tracking-widest hover:bg-slate-50 rounded-xl transition-all"
+            >
+              Cancelar
+            </button>
+          </div>
         </div>
       </Modal>
     </div>

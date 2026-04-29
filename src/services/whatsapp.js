@@ -11,21 +11,63 @@ function getNumericPhone(value) {
   if (!raw || raw.includes('@lid') || raw.includes('@g.us')) return null;
 
   const digits = raw.replace(/\D/g, '');
-  return digits.length >= 10 ? digits : null;
+  if (digits.length < 10) return null;
+  if (digits.startsWith('55') && digits.length === 12) {
+    return `${digits.slice(0, 4)}9${digits.slice(4)}`;
+  }
+  if (!digits.startsWith('55') && digits.length === 10) {
+    return `55${digits.slice(0, 2)}9${digits.slice(2)}`;
+  }
+  if (!digits.startsWith('55') && digits.length === 11) {
+    return `55${digits}`;
+  }
+  return digits;
+}
+
+function getPhoneVariants(value) {
+  const raw = String(value || '');
+  if (!raw || raw.includes('@lid') || raw.includes('@g.us')) return [];
+
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length < 10) return [];
+
+  const canonical = getNumericPhone(digits);
+  const variants = new Set([canonical, digits]);
+
+  if (canonical?.startsWith('55') && canonical.length === 13 && canonical[4] === '9') {
+    variants.add(`${canonical.slice(0, 4)}${canonical.slice(5)}`);
+    variants.add(canonical.slice(2));
+    variants.add(`${canonical.slice(2, 4)}${canonical.slice(5)}`);
+  }
+
+  if (canonical?.startsWith('55') && canonical.length === 12) {
+    const withNine = `${canonical.slice(0, 4)}9${canonical.slice(4)}`;
+    variants.add(withNine);
+    variants.add(canonical.slice(2));
+    variants.add(withNine.slice(2));
+  }
+
+  if (!digits.startsWith('55') && digits.length === 11 && digits[2] === '9') {
+    variants.add(`55${digits}`);
+    variants.add(`${digits.slice(0, 2)}${digits.slice(3)}`);
+    variants.add(`55${digits.slice(0, 2)}${digits.slice(3)}`);
+  }
+
+  return [...variants].filter(Boolean);
 }
 
 function getThreadAliases(msg) {
   const aliases = [];
   const contact = msg.contact || msg.deals?.contacts?.[0]?.contact;
-  const contactPhone = getNumericPhone(contact?.phone);
-  const senderPhone = getNumericPhone(msg.sender_phone);
-  const chatPhone = getNumericPhone(msg.chat_id);
+  const contactPhones = getPhoneVariants(contact?.phone);
+  const senderPhones = getPhoneVariants(msg.sender_phone);
+  const chatPhones = getPhoneVariants(msg.chat_id);
 
   if (msg.contact_id) aliases.push(`contact:${msg.contact_id}`);
   if (contact?.id) aliases.push(`contact:${contact.id}`);
-  if (contactPhone) aliases.push(`phone:${contactPhone}`);
-  if (senderPhone) aliases.push(`phone:${senderPhone}`);
-  if (chatPhone) aliases.push(`phone:${chatPhone}`);
+  contactPhones.forEach((phone) => aliases.push(`phone:${phone}`));
+  senderPhones.forEach((phone) => aliases.push(`phone:${phone}`));
+  chatPhones.forEach((phone) => aliases.push(`phone:${phone}`));
   if (msg.chat_id) aliases.push(`chat:${msg.chat_id}`);
 
   return [...new Set(aliases)];
@@ -95,6 +137,7 @@ export async function getWhatsAppInbox() {
 
   const coreQuery = `
     *,
+    thread:whatsapp_threads(*),
     contact:contacts(*),
     deals (
       id, title, status, stage, is_qualified,
@@ -112,26 +155,18 @@ export async function getWhatsAppInbox() {
 
   if (error) throw error;
 
-  const { data: canonicalAliases } = await supabase
-    .from('whatsapp_thread_aliases')
-    .select('thread_key, alias')
-    .eq('org_id', orgId);
-
   const inboxMap = new Map();
-  const aliasMap = new Map();
 
   (data || []).forEach((msg) => {
     const aliases = getThreadAliases(msg);
     if (!aliases.length) return;
 
-    let key = aliases.find((alias) => aliasMap.has(alias) && inboxMap.has(aliasMap.get(alias)));
-    if (key) {
-      key = aliasMap.get(key);
-    } else {
-      key = aliases[0];
-    }
-
-    aliases.forEach((alias) => aliasMap.set(alias, key));
+    const contact = msg.contact || msg.deals?.contacts?.[0]?.contact;
+    const key = msg.thread_id
+      ? `thread:${msg.thread_id}`
+      : msg.contact_id || contact?.id
+        ? `contact:${msg.contact_id || contact?.id}`
+        : `chat:${msg.chat_id}`;
 
     const existing = inboxMap.get(key);
     const threadDisplayName = getThreadDisplayName(msg) || existing?.thread_display_name || null;
@@ -154,10 +189,13 @@ export async function getWhatsAppInbox() {
     }
   });
 
-  mergeAliasGroups(inboxMap, aliasMap, canonicalAliases || []);
-
   return Array.from(inboxMap.values()).map((msg) => {
     const contact = msg.contact || msg.deals?.contacts?.[0]?.contact;
+    const threadKey = msg.thread_id
+      ? `thread:${msg.thread_id}`
+      : msg.contact_id || contact?.id
+        ? `contact:${msg.contact_id || contact?.id}`
+        : `chat:${msg.chat_id}`;
     const contactName = contact?.name;
     const isGenericContact = isGenericContactName(contactName);
     const fallbackIdentity = contact?.phone || msg.thread_phone || msg.sender_phone || msg.chat_id;
@@ -170,7 +208,9 @@ export async function getWhatsAppInbox() {
 
     return {
       id: msg.chat_id,
-      contact_id: msg.contact_id,
+      thread_key: threadKey,
+      thread_id: msg.thread_id,
+      contact_id: msg.contact_id || contact?.id,
       thread_aliases: msg.thread_aliases || [],
       deal_id: msg.deal_id,
       deal_title: msg.deals?.title || 'Inbox',

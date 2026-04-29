@@ -34,7 +34,7 @@ export default function FlowToolbar({
 
           <div className="min-w-0 flex-1">
             <input
-              value={flow.name}
+              value={flow.name || ''}
               onChange={(event) => onChange('name', event.target.value)}
               placeholder="Nome do fluxo"
               className="w-full bg-transparent text-3xl font-black tracking-tight text-slate-950 focus:outline-none"
@@ -47,7 +47,7 @@ export default function FlowToolbar({
                 {validationCount} alertas
               </div>
               <input
-                value={flow.description}
+                value={flow.description || ''}
                 onChange={(event) => onChange('description', event.target.value)}
                 placeholder="Descreva o objetivo da automacao"
                 className="min-w-[280px] flex-1 rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-4 focus:ring-primary/10"

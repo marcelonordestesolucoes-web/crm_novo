@@ -62,15 +62,20 @@ export function normalizeFlowJson(flowJson) {
       }));
 
   return {
-    nodes: nodes.map((node, index) => ({
-      id: node.id || `node_${index + 1}`,
-      type: node.type || 'send_message',
-      position: {
-        x: Number.isFinite(node?.position?.x) ? node.position.x : 140 + (index * 260),
-        y: Number.isFinite(node?.position?.y) ? node.position.y : 120
-      },
-      config: node.config || {}
-    })),
+    nodes: nodes.map((node, index) => {
+      const rawConfig = node.config || {};
+      // Strip internal UI-only fields before persisting
+      const { is_editing, ...cleanConfig } = rawConfig;
+      return {
+        id: node.id || `node_${index + 1}`,
+        type: node.type || 'send_message',
+        position: {
+          x: Number.isFinite(node?.position?.x) ? node.position.x : 140 + (index * 260),
+          y: Number.isFinite(node?.position?.y) ? node.position.y : 120
+        },
+        config: cleanConfig
+      };
+    }),
     edges: edges
       .filter((edge) => edge?.from && edge?.to)
       .map((edge) => ({

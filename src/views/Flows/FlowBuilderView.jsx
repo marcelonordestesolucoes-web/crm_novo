@@ -3,6 +3,7 @@ import {
   AppWindow,
   BadgeHelp,
   Bot,
+  CheckCircle2,
   CircleDashed,
   Clock3,
   Equal,
@@ -135,7 +136,8 @@ const BLOCK_DEFINITIONS = {
       format: 'padrao',
       message: '',
       text_activated: false,
-      mark_as_forwarded: false
+      mark_as_forwarded: false,
+      typing_seconds: '0'
     }),
     getSummary: (config) => config.image_name || config.image_link || 'Imagem ainda nao configurada.'
   },
@@ -176,7 +178,8 @@ const BLOCK_DEFINITIONS = {
       show_link_input: false,
       message: '',
       text_activated: false,
-      mark_as_forwarded: false
+      mark_as_forwarded: false,
+      typing_seconds: '0'
     }),
     getSummary: (config) => config.document_name || config.document_link || 'Documento ainda nao configurado.'
   },
@@ -187,7 +190,7 @@ const BLOCK_DEFINITIONS = {
     icon: MessageSquareQuote,
     iconWrapClass: 'bg-primary/10 text-primary',
     description: 'Faz uma pergunta e espera resposta.',
-    createConfig: () => ({ message: '', response_type: 'texto', timeout_minutes: '' }),
+    createConfig: () => ({ message: '', response_type: 'texto', timeout_minutes: '', typing_seconds: '0', mark_as_forwarded: false }),
     getSummary: (config) => config.message || 'Pergunta aguardando configuracao.'
   },
   send_options: {
@@ -203,7 +206,9 @@ const BLOCK_DEFINITIONS = {
       response_key: 'selecione',
       list_title: 'Selecione as opcoes abaixo:',
       options: 'Sim\nNao',
-      timeout_seconds: '0'
+      timeout_seconds: '0',
+      typing_seconds: '0',
+      mark_as_forwarded: false
     }),
     getSummary: (config) => config.options ? `${String(config.options).split('\n').filter(Boolean).length} opcoes configuradas.` : 'Nenhuma opcao definida.'
   },
@@ -276,6 +281,26 @@ const BLOCK_DEFINITIONS = {
     createConfig: () => ({ field: '', value: '', true_label: 'Sim', false_label: 'Nao' }),
     getSummary: (config) => (config.field && config.value) ? `${config.field} igual a ${config.value}.` : 'Comparacao exata pendente.'
   },
+  condition_validation: {
+    type: 'condition_validation',
+    title: 'Validar Formato',
+    group: 'Condição',
+    icon: CheckCircle2,
+    iconWrapClass: 'bg-amber-50 text-amber-600',
+    description: 'Valida CPF/CNPJ, Email ou Numeros.',
+    createConfig: () => ({ validation_type: 'cpf_cnpj', exact_length: '', max_retries: '3', true_label: 'Valido', retry_label: 'Tentar N.', false_label: 'Falhou' }),
+    getSummary: (config) => config.validation_type ? `Valida formato ${config.validation_type}.` : 'Regra nao configurada.'
+  },
+  action_validation: {
+    type: 'condition_validation',
+    title: 'Validar Formato',
+    group: 'Condição',
+    icon: CheckCircle2,
+    iconWrapClass: 'bg-amber-50 text-amber-600',
+    description: 'Valida CPF/CNPJ, Email ou Numeros.',
+    createConfig: () => ({ validation_type: 'cpf_cnpj', exact_length: '', max_retries: '3', true_label: 'Valido', retry_label: 'Tentar N.', false_label: 'Falhou' }),
+    getSummary: (config) => config.validation_type ? `Valida formato ${config.validation_type}.` : 'Regra nao configurada.'
+  },
   condition_business_hours: {
     type: 'condition_business_hours',
     title: 'Horario comercial',
@@ -335,6 +360,16 @@ const BLOCK_DEFINITIONS = {
     description: 'Finaliza a automacao.',
     createConfig: () => ({ reason: '' }),
     getSummary: (config) => config.reason || 'Encerra a jornada neste ponto.'
+  },
+  action_delay: {
+    type: 'action_delay',
+    title: 'Aguardar Intervalo',
+    group: 'Acao CRM',
+    icon: Clock3,
+    iconWrapClass: 'bg-amber-50 text-amber-600',
+    description: 'Pausa a execucao por um tempo determinado.',
+    createConfig: () => ({ duration: '1', unit: 'minutes' }),
+    getSummary: (config) => `Aguardar ${config.duration || '1'} ${config.unit === 'hours' ? 'hora(s)' : config.unit === 'days' ? 'dia(s)' : 'minuto(s)'}.`
   }
 };
 
@@ -355,9 +390,10 @@ const INSERT_TYPE_MAP = {
   integration_gptmaker: 'action_create_task',
   action_limit: 'action_end_flow',
   action_record: 'action_create_task',
-  action_interval: 'condition_business_hours',
+  action_interval: 'action_delay',
   action_condition: 'condition_contains_text',
   action_multi_condition: 'condition_equals_value',
+  action_validation: 'condition_validation',
   action_move: 'action_move_stage',
   action_randomize: 'action_create_task',
   action_fake_call: 'action_create_task',
@@ -369,6 +405,7 @@ const INSERT_LIBRARY_GROUPS = [
     label: 'Mensagens',
     items: [
       { type: 'message_text', actualType: 'send_message', shortTitle: 'Texto', title: 'Texto', description: 'Mensagem simples', icon: MessageCircle },
+      { type: 'message_question', actualType: 'ask_question', shortTitle: 'Pergunta', title: 'Pergunta', description: 'Pergunta e valida a resposta', icon: MessageSquareQuote },
       { type: 'message_link', actualType: 'send_link', shortTitle: 'Link', title: 'Link', description: 'Mensagem com link', icon: Link2 }
     ]
   },
@@ -403,7 +440,8 @@ const INSERT_LIBRARY_GROUPS = [
     items: [
       { type: 'action_limit', actualType: 'action_end_flow', shortTitle: 'Limitar execucao', title: 'Limitar execucao', description: 'Termina o fluxo', icon: XCircle },
       { type: 'action_record', actualType: 'action_create_task', shortTitle: 'Gravar Info', title: 'Gravar Info', description: 'Cria registro interno', icon: CircleDashed },
-      { type: 'action_interval', actualType: 'condition_business_hours', shortTitle: 'Intervalo', title: 'Intervalo', description: 'Condicao de horario', icon: Clock3 },
+      { type: 'action_interval', actualType: 'action_delay', shortTitle: 'Aguardar', title: 'Aguardar Intervalo', description: 'Pausa a automacao', icon: Clock3 },
+      { type: 'action_validation', actualType: 'condition_validation', shortTitle: 'Validacao', title: 'Validar Formato', description: 'Valida CPF, Email...', icon: CheckCircle2 },
       { type: 'action_condition', actualType: 'condition_contains_text', shortTitle: 'Condicao', title: 'Condicao', description: 'Valida regra simples', icon: GitBranch },
       { type: 'action_multi_condition', actualType: 'condition_equals_value', shortTitle: 'Multi Condi.', title: 'Multi Condi.', description: 'Comparacao exata', icon: Equal },
       { type: 'action_move', actualType: 'action_move_stage', shortTitle: 'Mover fluxo', title: 'Mover fluxo', description: 'Move de etapa', icon: Workflow },
@@ -419,7 +457,9 @@ function isConditionType(type) {
     'condition_contains_text',
     'condition_equals_value',
     'condition_business_hours',
-    'condition_contact_has_tag'
+    'condition_contact_has_tag',
+    'condition_validation',
+    'action_validation'
   ].includes(type);
 }
 
@@ -508,6 +548,8 @@ function getNextNodePosition(nodes, afterNodeId = null, branchKey = null) {
 
   const branchOffset = branchKey === 'true'
     ? { x: 340, y: -90 }
+    : branchKey === 'retry'
+      ? { x: FLOW_NODE_SLOT.width + FLOW_NODE_SLOT.gapX, y: 0 }
     : branchKey === 'false'
       ? { x: FLOW_NODE_SLOT.width + FLOW_NODE_SLOT.gapX, y: 140 }
       : { x: FLOW_NODE_SLOT.width + FLOW_NODE_SLOT.gapX, y: 0 };
@@ -575,8 +617,10 @@ function getPreferredEdge(edges, node, simulatedResponses) {
 
   if (node.type === 'send_options') {
     const selectedIndex = Number(simulatedResponses[node.id] ?? 0);
-    const wantedHandle = `option_${Number.isNaN(selectedIndex) ? 0 : selectedIndex}`;
+    const wantedHandle = `option_${Number.isNaN(selectedIndex) ? 1 : selectedIndex + 1}`;
+    const legacyHandle = `option_${Number.isNaN(selectedIndex) ? 0 : selectedIndex}`;
     return outgoing.find((edge) => normalizeGenericHandle(edge.sourceHandle || edge.label) === wantedHandle)
+      || outgoing.find((edge) => normalizeGenericHandle(edge.sourceHandle || edge.label) === legacyHandle)
       || outgoing[0];
   }
 
@@ -675,6 +719,10 @@ function validateFlow(flow, blockDefinitions) {
       const outgoing = edges.filter((edge) => edge.from === node.id);
       const hasTrue = outgoing.some((edge) => (edge.sourceHandle || edge.label) === 'true');
       const hasFalse = outgoing.some((edge) => (edge.sourceHandle || edge.label) === 'false');
+      const hasRetry = outgoing.some((edge) => (edge.sourceHandle || edge.label) === 'retry');
+      if ((node.type === 'condition_validation' || node.type === 'action_validation') && !hasRetry) {
+        issues.push(`"${meta.title}" precisa do caminho tentar novamente.`);
+      }
       if (!hasTrue || !hasFalse) {
         issues.push(`"${meta.title}" precisa dos caminhos verdadeiro e falso.`);
       }

@@ -3,21 +3,30 @@ import { Handle, Position } from '@xyflow/react';
 import {
   Check,
   CircleHelp,
+  Clock3,
   Copy,
   FileText,
   Link2,
   MessageCircle,
   Mic,
   MoreHorizontal,
+  Paperclip,
   Phone,
   Play,
   Plus,
   SendHorizontal,
+  Smile,
   Trash2,
   Upload,
-  X
+  X,
+  User,
+  Building2,
+  Briefcase
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import EmojiPicker from 'emoji-picker-react';
+import { useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
 
 const MESSAGE_TYPES = new Set([
   'send_message',
@@ -29,6 +38,14 @@ const MESSAGE_TYPES = new Set([
   'send_options',
   'send_copy_code'
 ]);
+
+const MAGIC_VARIABLES = [
+  { id: 'contato.nome', label: 'Nome do Contato', icon: User },
+  { id: 'contato.telefone', label: 'Telefone do Contato', icon: Phone },
+  { id: 'empresa.nome', label: 'Nome da Empresa', icon: Building2 },
+  { id: 'empresa.cnpj', label: 'CNPJ da Empresa', icon: FileText },
+  { id: 'vendedor.nome', label: 'Nome do Responsável', icon: Briefcase }
+];
 
 const MEDIA_META = {
   send_video: { prefix: 'video', label: 'videos', accept: 'video/*', icon: Play },
@@ -74,35 +91,53 @@ function FooterStatus({ value, onChange, accent = 'cyan', label = 'Status digita
   const accentClass = accent === 'violet' ? 'border-violet-300 text-violet-500' : 'border-cyan-300 text-cyan-500';
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr),118px] items-center gap-2 px-5 py-4">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border-2', accentClass)}>
-          <MoreHorizontal className="h-5 w-5" />
+    <div className="flex items-center justify-between px-5 py-2.5">
+      <div className="flex items-center gap-2">
+        <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border-2', accentClass)}>
+          <MoreHorizontal className="h-4 w-4" />
         </div>
-        <div className="min-w-0">
-          <div className="text-[12px] font-semibold text-slate-600">{label}</div>
-          <div className="mt-1 flex items-center gap-1.5">
+        <div>
+          <div className="text-[10px] font-semibold text-slate-500 leading-tight">{label}</div>
+          <div className="flex items-center gap-1">
             <input
               value={value ?? '0'}
               onClick={(event) => event.stopPropagation()}
               onChange={(event) => onChange(event.target.value)}
-              className="nodrag nopan h-7 w-9 rounded-full border border-slate-200 bg-slate-50 text-center text-xs font-bold text-slate-700 outline-none focus:border-cyan-300"
+              className="nodrag nopan h-5 w-7 rounded-full border border-slate-200 bg-slate-50 text-center text-[10px] font-bold text-slate-700 outline-none"
             />
-            <span className="text-xs font-semibold text-slate-500">segundos</span>
+            <span className="text-[10px] font-semibold text-slate-400">seg</span>
           </div>
         </div>
       </div>
-      <div className="text-right text-[12px] font-semibold text-slate-700">Proximo passo</div>
+      <div className="text-right text-[10px] font-bold text-slate-400 uppercase tracking-tight">Proximo</div>
     </div>
   );
 }
 
+function formatWhatsAppText(text) {
+  if (!text) return '';
+  return text
+    .replace(/\*(.*?)\*/g, '<strong>$1</strong>')
+    .replace(/_(.*?)_/g, '<em>$1</em>')
+    .replace(/~(.*?)~/g, '<del>$1</del>')
+    .split('\n').join('<br />');
+}
+
 function ActivatedText({ children }) {
+  const formatted = useMemo(() => formatWhatsAppText(children), [children]);
+  
   return (
-    <div className="rounded-2xl bg-[#d8fbf4] px-4 py-4 text-[14px] font-semibold leading-relaxed text-slate-700">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0 flex-1 whitespace-pre-wrap break-words">{children}</div>
-        <Check className="h-4 w-4 shrink-0 text-[#3fc9b9]" />
+    <div className="w-full">
+      <div className="relative w-full rounded-2xl rounded-tl-none bg-[#e2ffc7] px-3.5 py-2.5 text-[13px] leading-[1.45] text-slate-800 shadow-sm border border-[#d1f4ad]">
+        <div className="flex flex-col gap-1">
+          <div 
+            className="min-w-0 break-words"
+            dangerouslySetInnerHTML={{ __html: formatted }}
+          />
+          <div className="flex justify-end -mb-1 -mr-1">
+            <Check className="h-3.5 w-3.5 text-sky-500" />
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -125,12 +160,60 @@ export default function FlowNodeCard({ id, data, selected }) {
   const fileInputRef = useRef(null);
   const [requestModalOpen, setRequestModalOpen] = useState(false);
   const [requestTab, setRequestTab] = useState('headers');
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [showVarsMenu, setShowVarsMenu] = useState(false);
+  const [isTriggerEditing, setIsTriggerEditing] = useState(false);
+  const [localTriggerType, setLocalTriggerType] = useState(config.trigger_type || 'any_interaction');
+  const [localKeyword, setLocalKeyword] = useState(config.keyword || '');
+  const [localWorkingHours, setLocalWorkingHours] = useState(Boolean(config.use_working_hours));
+  const emojiPickerRef = useRef(null);
+  const attachMenuRef = useRef(null);
+  const varsMenuRef = useRef(null);
+  const messageInputRef = useRef(null);
+
+  useEffect(() => {
+    const el = messageInputRef.current;
+    if (el) {
+      // Se não estiver focado (ex: carregamento inicial ou clique em emoji),
+      // sincronizamos o valor com o estado global.
+      if (document.activeElement !== el) {
+        el.value = config.message || '';
+      }
+      // Sempre ajustamos a altura
+      el.style.height = 'auto';
+      el.style.height = el.scrollHeight + 'px';
+    }
+  }, [config.message, config.text_activated]);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target)) {
+        setShowEmojiPicker(false);
+      }
+      if (attachMenuRef.current && !attachMenuRef.current.contains(event.target)) {
+        setShowAttachMenu(false);
+      }
+      if (varsMenuRef.current && !varsMenuRef.current.contains(event.target)) {
+        setShowVarsMenu(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const isStart = node.type === 'trigger_start';
-  const isCondition = node.type.startsWith('condition_');
+  const isValidationCondition = (
+    node.type === 'condition_validation'
+    || node.type === 'action_validation'
+    || meta?.type === 'condition_validation'
+    || meta?.title === 'Validar Formato'
+  );
+  const isCondition = node.type.startsWith('condition_') || isValidationCondition;
   const isOptions = node.type === 'send_options';
   const isActionButtons = node.type === 'send_action_buttons';
   const isCopyCode = node.type === 'send_copy_code';
+  const isDelay = node.type === 'action_delay';
   const isExternalCall = node.type === 'integration_external_call';
   const isLink = node.type === 'send_link';
   const mediaMeta = MEDIA_META[node.type];
@@ -139,13 +222,16 @@ export default function FlowNodeCard({ id, data, selected }) {
   const textActivated = Boolean(config.text_activated);
   const hasMessageText = Boolean(String(config.message || '').trim());
   const hasActionText = Boolean(String(config.title || config.description || config.footer || '').trim());
+  
+  const isButtonBlock = isOptions || isActionButtons;
+  const isAllowedToAttach = isButtonBlock || isMedia;
   const actions = useMemo(() => {
     if (!Array.isArray(config.actions) || !config.actions.length) {
       return [{ type: 'link', title: '', value: '' }];
     }
     return config.actions;
   }, [config.actions]);
-  const options = useMemo(() => String(config.options || 'Sim\nNao').split('\n'), [config.options]);
+  const options = useMemo(() => String(config.options ?? '').split('\n'), [config.options]);
   const optionFormat = config.format || 'botoes';
 
   const updateConfig = (partial) => onUpdateNodeConfig(id, partial);
@@ -184,90 +270,339 @@ export default function FlowNodeCard({ id, data, selected }) {
     updateConfig({ actions: next.length ? next : [{ type: 'link', title: '', value: '' }] });
   };
 
-  const chooseFile = (event) => {
+  const chooseFile = async (event) => {
     const file = event.target.files?.[0];
-    if (!file || !mediaMeta) return;
+    if (!file) return;
+
+    // Detectamos o tipo pelo arquivo
+    const isVideo = file.type.startsWith('video/');
+    const isImage = file.type.startsWith('image/');
+    const isAudio = file.type.startsWith('audio/');
+    
+    let targetType = node.type;
+    if (!MEDIA_META[node.type]) {
+      targetType = isVideo ? 'send_video' : isAudio ? 'send_audio' : isImage ? 'send_image' : 'send_document';
+    }
+    
+    const targetMeta = MEDIA_META[targetType];
+    const prefix = targetMeta.prefix;
+
+    // 1. Mostrar estado de carregando
     updateConfig({
-      [`${mediaMeta.prefix}_name`]: file.name,
-      [`${mediaMeta.prefix}_file_size`]: file.size,
-      [`${mediaMeta.prefix}_ready`]: true,
-      [`${mediaMeta.prefix}_uploading`]: false,
-      [`${mediaMeta.prefix}_source`]: 'file'
+      [`${prefix}_uploading`]: true,
+      [`${prefix}_ready`]: false,
+      [`${prefix}_name`]: file.name,
+      // Se for um bloco de botoes, mantemos o tipo. Se for outro, mudamos para o tipo da midia.
+      type: isButtonBlock ? node.type : targetType
     });
+
+    try {
+      // 2. Upload para o Supabase (usando bucket existente deal-attachments)
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Math.random().toString(36).substring(2)}-${Date.now()}.${fileExt}`;
+      const filePath = `flows/flow-${id}/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('deal-attachments')
+        .upload(filePath, file);
+
+      if (uploadError) {
+        console.error('[FlowBuilder] Erro no upload:', uploadError.message);
+        throw uploadError;
+      }
+
+      // 3. Pegar URL Publica
+      const { data: { publicUrl } } = supabase.storage
+        .from('deal-attachments')
+        .getPublicUrl(filePath);
+
+      // 4. Finalizar config do no
+      onUpdateNodeConfig(id, {
+        ...config,
+        type: targetType,
+        [`${prefix}_url`]: publicUrl,
+        [`${prefix}_name`]: file.name,
+        [`${prefix}_file_size`]: file.size,
+        [`${prefix}_ready`]: true,
+        [`${prefix}_uploading`]: false,
+        [`${prefix}_source`]: 'url',
+        text_activated: false
+      });
+    } catch (err) {
+      console.error('[FlowBuilder] Erro no upload:', err);
+      updateConfig({
+        [`${prefix}_uploading`]: false,
+        [`${prefix}_error`]: 'Falha no upload'
+      });
+    }
   };
 
-  const renderActivationRow = ({ withAttach = false, actionMode = false } = {}) => (
-    <div className={cn('grid items-center gap-2', withAttach ? 'grid-cols-[28px,28px,minmax(0,1fr),40px]' : 'grid-cols-[28px,minmax(0,1fr),40px]')}>
-      {withAttach && (
-        <button type="button" onClick={(event) => event.stopPropagation()} className="nodrag nopan flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100">
-          <Plus className="h-4 w-4" />
-        </button>
-      )}
-      <button type="button" onClick={(event) => event.stopPropagation()} className="nodrag nopan flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100">
-        <MessageCircle className="h-4 w-4" />
-      </button>
-      <button
-        type="button"
-        onClick={(event) => {
-          event.stopPropagation();
-          updateConfig({ text_activated: false });
-        }}
-        className="nodrag nopan h-10 rounded-lg border border-slate-200 bg-white text-sm font-semibold text-slate-700 underline underline-offset-2 hover:border-cyan-300 hover:text-cyan-600"
-      >
-        Editar
-      </button>
-      <button
-        type="button"
-        onClick={(event) => event.stopPropagation()}
-        className="nodrag nopan flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-300"
-        title={actionMode ? 'Texto ativado' : 'Mensagem ativada'}
-      >
-        <SendHorizontal className="h-5 w-5" />
-      </button>
-    </div>
-  );
 
   const renderMessageInput = ({ placeholder = 'Digite sua mensagem', withAttach = false } = {}) => (
-    <div className="border-t border-b border-slate-200/80 bg-white/90 px-5 py-4">
-      <div className="mb-4 text-center text-[12px] font-semibold italic tracking-wide text-slate-300">
-        Digite sua mensagem abaixo
-      </div>
+    <div className="border-t border-b border-slate-200/80 bg-white/90 px-2 py-2">
       {!textActivated ? (
-        <div className={cn('grid items-center gap-2', withAttach ? 'grid-cols-[28px,28px,minmax(0,1fr),40px]' : 'grid-cols-[28px,minmax(0,1fr),40px]')}>
-          {withAttach && (
-            <button type="button" onClick={(event) => event.stopPropagation()} className="nodrag nopan flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100">
-              <Plus className="h-4 w-4" />
-            </button>
-          )}
-          <button type="button" onClick={(event) => event.stopPropagation()} className="nodrag nopan flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100">
-            <MessageCircle className="h-4 w-4" />
-          </button>
-          <input
-            value={config.message || ''}
-            onClick={(event) => event.stopPropagation()}
-            onChange={(event) => updateConfig({ message: event.target.value, text_activated: false })}
-            placeholder={placeholder}
-            className="nodrag nopan h-10 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
-          />
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              activateMessage();
-            }}
-            className={cn(
-              'nodrag nopan flex h-10 w-10 items-center justify-center rounded-full border transition-all',
-              hasMessageText ? 'border-cyan-300 bg-cyan-100 text-cyan-600' : 'border-slate-200 bg-slate-100 text-slate-300'
-            )}
-            title="Ativar mensagem"
-          >
-            <SendHorizontal className="h-5 w-5" />
-          </button>
-        </div>
+          <div className="flex items-end gap-1.5 flex-nowrap relative">
+            <div className="flex items-end gap-0.5 shrink-0 relative pb-0.5">
+              <div ref={attachMenuRef} className="relative">
+                {isAllowedToAttach && (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setShowAttachMenu(!showAttachMenu);
+                      setShowEmojiPicker(false);
+                    }}
+                    className={cn(
+                      "nodrag nopan flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+                      showAttachMenu ? "bg-slate-200 text-slate-700" : "text-slate-400 hover:bg-slate-100"
+                    )}
+                  >
+                    <Paperclip className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                
+                {showAttachMenu && (
+                  <div className="absolute bottom-full left-0 mb-2 z-[100] flex flex-col gap-2 p-2 bg-white rounded-xl shadow-xl border border-slate-100 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setShowAttachMenu(false);
+                        // Abrimos o seletor. A logica de mudar o tipo esta no chooseFile
+                        fileInputRef.current.accept = 'video/*';
+                        fileInputRef.current.click();
+                      }}
+                      className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-50 text-slate-600 hover:bg-violet-50 hover:text-violet-600 shadow-sm transition-all"
+                      title="Anexar Vídeo"
+                    >
+                      <Play className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setShowAttachMenu(false);
+                        fileInputRef.current.accept = 'image/*';
+                        fileInputRef.current.click();
+                      }}
+                      className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-50 text-slate-600 hover:bg-violet-50 hover:text-violet-600 shadow-sm transition-all"
+                      title="Anexar Imagem"
+                    >
+                      <Upload className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div ref={emojiPickerRef} className="relative">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setShowEmojiPicker(!showEmojiPicker);
+                    setShowAttachMenu(false);
+                  }}
+                  className={cn(
+                    "nodrag nopan flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+                    showEmojiPicker ? "bg-slate-200 text-slate-700" : "text-slate-400 hover:bg-slate-100"
+                  )}
+                >
+                  <Smile className="h-3.5 w-3.5" />
+                </button>
+
+                {showEmojiPicker && (
+                  <div className="absolute bottom-full left-0 mb-2 z-[100] shadow-2xl animate-in fade-in slide-in-from-bottom-2 duration-200">
+                    <EmojiPicker
+                      onEmojiClick={(emojiData) => {
+                        const currentMsg = config.message || '';
+                        updateConfig({ message: currentMsg + emojiData.emoji });
+                        setShowEmojiPicker(false);
+                      }}
+                      width={280}
+                      height={350}
+                      theme="light"
+                      searchDisabled
+                      skinTonesDisabled
+                      previewConfig={{ showPreview: false }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="relative flex-1 min-w-0" ref={varsMenuRef}>
+              {showVarsMenu && (
+                <div className="absolute bottom-full left-0 mb-2 z-[100] w-64 bg-white rounded-xl shadow-2xl border border-slate-100 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-200">
+                  <div className="bg-slate-50 px-3 py-2 border-b border-slate-100">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Variáveis Dinâmicas</span>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto p-1">
+                    {MAGIC_VARIABLES.map(v => (
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const el = messageInputRef.current;
+                          const val = el.value;
+                          const cursor = el.selectionStart;
+                          const lastAtSymbolIndex = val.lastIndexOf('@', cursor - 1);
+                          
+                          let newVal;
+                          let newCursor;
+                          if (lastAtSymbolIndex !== -1) {
+                            newVal = val.slice(0, lastAtSymbolIndex) + `{${v.id}}` + val.slice(cursor);
+                            newCursor = lastAtSymbolIndex + v.id.length + 2;
+                          } else {
+                            newVal = val.slice(0, cursor) + `{${v.id}}` + val.slice(cursor);
+                            newCursor = cursor + v.id.length + 2;
+                          }
+                          
+                          updateConfig({ message: newVal, text_activated: false });
+                          el.value = newVal;
+                          setShowVarsMenu(false);
+                          
+                          setTimeout(() => {
+                            el.focus();
+                            el.setSelectionRange(newCursor, newCursor);
+                            el.style.height = 'auto';
+                            el.style.height = el.scrollHeight + 'px';
+                          }, 10);
+                        }}
+                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-violet-50 text-left transition-colors group/var"
+                      >
+                        <v.icon className="h-3.5 w-3.5 text-slate-400 group-hover/var:text-violet-500" />
+                        <span className="text-xs font-semibold text-slate-600 group-hover/var:text-violet-700">{v.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <textarea
+                ref={messageInputRef}
+                defaultValue={config.message || ''}
+                onClick={(event) => event.stopPropagation()}
+                onChange={(event) => {
+                  event.target.style.height = 'auto';
+                  event.target.style.height = event.target.scrollHeight + 'px';
+                  const val = event.target.value;
+                  const cursor = event.target.selectionStart;
+                  updateConfig({ message: val, text_activated: false });
+                  
+                  if (val[cursor - 1] === '@') {
+                    setShowVarsMenu(true);
+                  } else if (showVarsMenu && val[cursor - 1] === ' ') {
+                    setShowVarsMenu(false);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    activateMessage();
+                  }
+                }}
+                placeholder={placeholder}
+                rows={1}
+                className="nodrag nopan block min-h-[32px] w-full resize-none overflow-hidden rounded-lg border border-slate-100 bg-slate-50/50 px-2.5 py-1.5 text-[12px] font-semibold text-slate-700 outline-none focus:border-slate-300 focus:bg-white transition-colors"
+              />
+            </div>
+            <div className="pb-0.5">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  activateMessage();
+                }}
+                className={cn(
+                  'nodrag nopan flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border transition-all',
+                  hasMessageText ? 'border-cyan-200 bg-cyan-50 text-cyan-600' : 'border-slate-100 bg-slate-50 text-slate-300'
+                )}
+                title="Ativar mensagem"
+              >
+                <SendHorizontal className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           <ActivatedText>{config.message || 'Mensagem vazia'}</ActivatedText>
-          {renderActivationRow({ withAttach })}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-0.5 shrink-0">
+              <div className="relative">
+                {isAllowedToAttach && (
+                  <button 
+                    type="button" 
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setShowAttachMenu(!showAttachMenu);
+                      setShowEmojiPicker(false);
+                    }} 
+                    className={cn(
+                      "nodrag nopan flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+                      showAttachMenu ? "bg-slate-200 text-slate-700" : "text-slate-400 hover:bg-slate-100"
+                    )}
+                  >
+                    <Paperclip className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {showAttachMenu && (
+                  <div className="absolute bottom-full left-0 mb-2 z-[100] flex flex-col gap-2 p-2 bg-white rounded-xl shadow-xl border border-slate-100 animate-in fade-in slide-in-from-bottom-2">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setShowAttachMenu(false); updateConfig({ type: 'send_video' }); fileInputRef.current?.click(); }} className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-50 text-slate-600 hover:bg-violet-50 hover:text-violet-600 shadow-sm transition-all"><Play className="h-3.5 w-3.5" /></button>
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setShowAttachMenu(false); updateConfig({ type: 'send_image' }); fileInputRef.current?.click(); }} className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-50 text-slate-600 hover:bg-violet-50 hover:text-violet-600 shadow-sm transition-all"><Upload className="h-3.5 w-3.5" /></button>
+                  </div>
+                )}
+              </div>
+              <div className="relative">
+                <button 
+                  type="button" 
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setShowEmojiPicker(!showEmojiPicker);
+                    setShowAttachMenu(false);
+                  }} 
+                  className={cn(
+                    "nodrag nopan flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+                    showEmojiPicker ? "bg-slate-200 text-slate-700" : "text-slate-400 hover:bg-slate-100"
+                  )}
+                >
+                  <Smile className="h-3.5 w-3.5" />
+                </button>
+                {showEmojiPicker && (
+                  <div className="absolute bottom-full left-0 mb-2 z-[100] shadow-2xl animate-in fade-in slide-in-from-bottom-2">
+                    <EmojiPicker
+                      onEmojiClick={(emojiData) => {
+                        const currentMsg = config.message || '';
+                        updateConfig({ message: currentMsg + emojiData.emoji, text_activated: false });
+                        setShowEmojiPicker(false);
+                      }}
+                      width={280}
+                      height={350}
+                      theme="light"
+                      searchDisabled
+                      skinTonesDisabled
+                      previewConfig={{ showPreview: false }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                updateConfig({ text_activated: false });
+              }}
+              className="nodrag nopan h-8 flex-1 rounded-lg border border-slate-200 bg-white text-[11px] font-black uppercase text-slate-500 hover:border-slate-300 hover:bg-slate-50 transition-all tracking-tight shadow-sm"
+            >
+              Editar
+            </button>
+            <button
+              type="button"
+              className="nodrag nopan flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-100 bg-slate-50 text-slate-300 opacity-40"
+              disabled
+            >
+              <SendHorizontal className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -275,10 +610,7 @@ export default function FlowNodeCard({ id, data, selected }) {
 
   const renderLink = () => (
     <>
-      <div className="border-t border-b border-slate-200/80 bg-white/90 px-5 py-4">
-        <div className="mb-4 text-center text-[12px] font-semibold italic tracking-wide text-slate-300">
-          Insira o link abaixo
-        </div>
+      <div className="border-t border-b border-slate-200/80 bg-white/90 px-5 py-2.5">
         <input
           value={config.link_url || ''}
           onClick={(event) => event.stopPropagation()}
@@ -306,84 +638,117 @@ export default function FlowNodeCard({ id, data, selected }) {
     </>
   );
 
-  const renderMedia = () => {
-    const prefix = mediaMeta.prefix;
-    const FileIcon = mediaMeta.icon;
+  const renderMediaPreview = () => {
+    // Se estivermos em um bloco de midia (send_image, etc), o mediaMeta ja existe.
+    // Se estivermos em um bloco de botoes, precisamos descobrir o prefixo com base no que esta anexado.
+    let activeMeta = mediaMeta;
+    if (!activeMeta) {
+      if (config.video_ready || config.video_uploading) activeMeta = MEDIA_META.send_video;
+      else if (config.image_ready || config.image_uploading) activeMeta = MEDIA_META.send_image;
+      else if (config.audio_ready || config.audio_uploading) activeMeta = MEDIA_META.send_audio;
+      else activeMeta = MEDIA_META.send_image; // Default
+    }
+
+    const prefix = activeMeta.prefix;
+    const FileIcon = activeMeta.icon;
     const name = config[`${prefix}_name`] || '';
     const ready = Boolean(config[`${prefix}_ready`]);
+    const url = config[`${prefix}_url` ] || config[`${prefix}_link`];
+    const isUploading = Boolean(config[`${prefix}_uploading`]);
+
+    // O preview SO aparece se houver algo sendo carregado ou ja pronto.
+    // Nao mostramos o "box de carregar" vazio por padrao.
+    if (!ready && !isUploading) return null;
 
     return (
-      <>
-        <div className="border-t border-b border-slate-200/80 bg-white px-5 py-5">
-          <div className="rounded-2xl bg-slate-100 px-5 py-7 text-center">
-            <FileIcon className="mx-auto h-8 w-8 text-slate-500" />
-            <div className="mt-3 text-xs font-semibold text-slate-600">Carregar {mediaMeta.label} do computador</div>
-            <div className="mt-1 text-[10px] font-medium text-slate-400">Tamanho maximo de arquivo</div>
-            <div className="mt-2 text-sm font-black text-violet-600">60 MB</div>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                fileInputRef.current?.click();
-              }}
-              className="nodrag nopan mt-2 rounded-full bg-violet-600 px-7 py-2 text-sm font-black text-white shadow-lg shadow-violet-500/20 hover:bg-violet-500"
-            >
-              Carregar
-            </button>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                updateConfig({ show_link_input: !config.show_link_input });
-              }}
-              className="nodrag nopan mt-2 block w-full text-xs font-semibold text-violet-500 underline"
-            >
-              Inserir por link
-            </button>
-            <input ref={fileInputRef} type="file" accept={mediaMeta.accept} onChange={chooseFile} className="hidden" />
+      <div className="border-t border-b border-slate-200/80 bg-white px-4 py-4">
+        {isUploading ? (
+          <div className="rounded-2xl bg-slate-50 px-5 py-12 text-center border border-slate-100 animate-pulse">
+            <div className="mx-auto h-8 w-8 rounded-full border-4 border-violet-200 border-t-violet-600 animate-spin" />
+            <div className="mt-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Enviando...</div>
           </div>
-          {config.show_link_input && (
-            <input
-              value={config[`${prefix}_link`] || ''}
-              onClick={(event) => event.stopPropagation()}
-              onChange={(event) => updateConfig({ [`${prefix}_link`]: event.target.value, [`${prefix}_ready`]: Boolean(event.target.value.trim()) })}
-              placeholder="Cole o link do arquivo"
-              className="nodrag nopan mt-3 h-10 w-full rounded-md border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-violet-300"
-            />
-          )}
-          {ready && (
-            <div className="mt-3 flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 text-xs font-semibold text-slate-600">
-              <Check className="h-4 w-4 text-emerald-500" />
-              <span className="min-w-0 flex-1 truncate">{name || config[`${prefix}_link`] || 'Arquivo pronto'}</span>
-              <button type="button" onClick={(event) => { event.stopPropagation(); updateConfig({ [`${prefix}_ready`]: false, [`${prefix}_name`]: '', [`${prefix}_link`]: '' }); }} className="nodrag nopan text-slate-400 hover:text-rose-500">
+        ) : (
+          <div className="rounded-2xl bg-slate-50 p-4 border border-slate-100 relative group/media">
+            <div className="flex items-center justify-between mb-3 px-1">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Visualização</span>
+              <button 
+                type="button" 
+                onClick={(event) => { 
+                  event.stopPropagation(); 
+                  updateConfig({ [`${prefix}_ready`]: false, [`${prefix}_url`]: '', [`${prefix}_name`]: '' }); 
+                }} 
+                className="nodrag nopan text-slate-300 hover:text-rose-500 transition-colors"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>
-          )}
-        </div>
-        {renderMessageInput({ placeholder: 'Digite @ p/ utilizar os campos' })}
-        <label className="flex items-center gap-2 border-b border-slate-200/80 px-5 py-3 text-xs font-semibold italic text-slate-500">
-          <input
-            type="checkbox"
-            checked={Boolean(config.mark_as_forwarded)}
-            onClick={(event) => event.stopPropagation()}
-            onChange={(event) => updateConfig({ mark_as_forwarded: event.target.checked })}
-            className="nodrag nopan h-4 w-4 rounded border-slate-300"
-          />
-          Marcar como encaminhada
-        </label>
-        <FooterStatus
-          accent="violet"
-          label={node.type === 'send_audio' ? 'Status gravando' : 'Status digitando'}
-          value={node.type === 'send_audio' ? config.recording_seconds : config.typing_seconds}
-          onChange={(value) => updateConfig(node.type === 'send_audio' ? { recording_seconds: value } : { typing_seconds: value })}
-        />
-      </>
+
+            <div className="relative overflow-hidden rounded-xl bg-white shadow-sm border border-slate-100 min-h-[120px] flex items-center justify-center">
+              {prefix === 'image' && url ? (
+                <img src={url} alt="Preview" className="max-h-[250px] w-full object-contain" />
+              ) : prefix === 'video' ? (
+                <div className="flex flex-col items-center gap-3 py-8 text-violet-500">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-violet-100 shadow-inner">
+                    <Play className="h-7 w-7 fill-current" />
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-tight opacity-60">Vídeo pronto</span>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-2 py-6 text-slate-400">
+                  <FileIcon className="h-10 w-10" />
+                  <span className="text-[10px] font-bold uppercase">{name || 'Arquivo pronto'}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-4 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  fileInputRef.current?.click();
+                }}
+                className="nodrag nopan w-full rounded-xl bg-violet-600 py-2.5 text-xs font-black text-white shadow-md shadow-violet-500/20 hover:bg-violet-500 transition-all active:scale-95"
+              >
+                Editar Arquivo
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  updateConfig({ show_link_input: !config.show_link_input });
+                }}
+                className="nodrag nopan text-[10px] font-bold text-violet-400 underline uppercase tracking-wider text-center"
+              >
+                Editar por link
+              </button>
+            </div>
+          </div>
+        )}
+
+        {config.show_link_input && (
+          <div className="mt-3 relative">
+            <input
+              value={config[`${prefix}_link`] || ''}
+              onClick={(event) => event.stopPropagation()}
+              onChange={(event) => updateConfig({ [`${prefix}_link`]: event.target.value, [`${prefix}_ready`]: Boolean(event.target.value.trim()), [`${prefix}_source`]: 'url' })}
+              placeholder="Cole o link do arquivo"
+              className="nodrag nopan h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-violet-300 shadow-sm"
+            />
+          </div>
+        )}
+      </div>
     );
   };
 
   const renderOptions = () => (
     <>
+      {/* Se houver midia anexada no bloco de opcoes, mostramos o preview no topo */}
+      {(config.image_ready || config.video_ready || config.image_uploading || config.video_uploading) && (
+        <div className="bg-white">
+          {renderMediaPreview()}
+        </div>
+      )}
       {renderMessageInput({ withAttach: true })}
       <div className="border-b border-slate-200/80 px-5 py-3">
         <div className="flex items-center gap-2">
@@ -407,60 +772,107 @@ export default function FlowNodeCard({ id, data, selected }) {
           <CircleHelp className="h-3.5 w-3.5 text-slate-400" />
         </div>
       </div>
-      {optionFormat === 'lista' && (
-        <div className="border-b border-slate-200/80 px-5 py-3">
-          <input
-            value={config.list_title || ''}
-            onClick={(event) => event.stopPropagation()}
-            onChange={(event) => updateConfig({ list_title: event.target.value })}
-            placeholder="Selecione as opcoes abaixo:"
-            className="nodrag nopan h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-cyan-300"
-          />
-        </div>
-      )}
-      <div className="space-y-2 border-b border-slate-200/80 px-5 py-4">
-        <div className="text-xs font-semibold italic text-slate-500">Opcoes:</div>
-        {options.map((option, index) => (
-          <div key={`${id}-option-${index}`} className="relative grid grid-cols-[minmax(0,1fr),54px,24px] items-center gap-2">
-            <input
-              value={option}
-              maxLength={20}
-              onClick={(event) => event.stopPropagation()}
-              onChange={(event) => updateOption(index, event.target.value)}
-              className="nodrag nopan h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-cyan-300"
-            />
-            <span className="text-right text-[10px] font-black text-cyan-600">CTR 0,0%</span>
-            <button type="button" onClick={(event) => { event.stopPropagation(); removeOption(index); }} className="nodrag nopan flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-slate-400 hover:bg-rose-50 hover:text-rose-500">
-              <X className="h-3 w-3" />
-            </button>
-            <NodeHandle id={`option_${index}`} className="!right-[-34px]" />
-          </div>
-        ))}
-        <button
-          type="button"
-          disabled={optionFormat === 'botoes' && options.length >= 3}
-          onClick={(event) => { event.stopPropagation(); addOption(); }}
-          className="nodrag nopan ml-auto block text-xs font-semibold text-slate-400 underline hover:text-cyan-600 disabled:text-slate-300"
-        >
-          Novo botao
-        </button>
+      <div className="border-b border-slate-200/80 px-5 py-2">
+        <input
+          value={config.list_title || ''}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => updateConfig({ list_title: event.target.value })}
+          placeholder="Selecione as opcoes abaixo:"
+          className="nodrag nopan h-8 w-full rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold outline-none focus:border-slate-400"
+        />
       </div>
-      <div className="relative border-b border-slate-200/80 px-5 py-3 text-xs font-semibold italic text-slate-500">
+      <div className="space-y-1.5 border-b border-slate-200/80 px-5 py-3">
+        <div className="flex items-center justify-between mb-0.5">
+          <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">Opcoes:</div>
+          <button
+            type="button"
+            disabled={optionFormat === 'botoes' && options.length >= 3}
+            onClick={(event) => { event.stopPropagation(); addOption(); }}
+            className="nodrag nopan text-[10px] font-bold text-slate-400 underline hover:text-primary disabled:text-slate-200"
+          >
+            Novo botao
+          </button>
+        </div>
+        {options.map((option, index) => {
+          const optionId = `option_${index + 1}`; // Usando 1-indexed para compatibilidade com edges existentes
+          return (
+            <div key={`${id}-option-${index}`} className="group/option flex items-center gap-3 relative">
+              <div className="relative flex-1">
+                <input
+                  value={option || ''}
+                  maxLength={20}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) => updateOption(index, event.target.value)}
+                  className="nodrag nopan h-8 w-full rounded-lg border border-slate-100 bg-slate-50/50 pl-3 pr-10 text-[13px] font-semibold text-slate-700 outline-none focus:border-slate-300 focus:bg-white"
+                />
+                <div className="absolute right-7 top-1/2 -translate-y-1/2 text-[8px] font-bold text-slate-300 tracking-tighter">
+                  {(option || '').length}/20
+                </div>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    removeOption(index);
+                  }}
+                  className="nodrag nopan absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-md text-slate-300 hover:bg-rose-50 hover:text-rose-500 transition-colors"
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </div>
+              <div className="min-w-[45px] text-[9px] font-black text-slate-400 uppercase tracking-tight">
+                CTR <span className="text-slate-600">0,0%</span>
+              </div>
+              <NodeHandle id={optionId} className="!-right-7 !h-3.5 !w-3.5" />
+            </div>
+          );
+        })}
+      </div>
+      <div className="relative border-b border-slate-200/80 px-5 py-2.5 text-[11px] font-semibold italic text-slate-400">
         Se nao responder em
         <input
           value={config.timeout_seconds ?? '0'}
           onClick={(event) => event.stopPropagation()}
           onChange={(event) => updateConfig({ timeout_seconds: event.target.value })}
-          className="nodrag nopan mx-2 h-7 w-10 rounded-full border border-slate-200 bg-slate-500 text-center text-xs font-bold text-white outline-none"
+          className="nodrag nopan mx-2 h-6 w-9 rounded-md border border-slate-300 bg-slate-400 text-center text-[11px] font-black text-white outline-none"
         />
         Segundos
-        <NodeHandle id="timeout" tone="rose" className="!right-[-34px]" />
+        <NodeHandle id="timeout" tone="rose" className="!-right-2" />
       </div>
-      <div className="relative px-5 py-3 text-xs font-semibold italic text-slate-500">
+      <div className="relative px-5 py-3 text-[11px] font-semibold italic text-slate-400">
         Caso a resposta seja invalida
-        <NodeHandle id="invalid" tone="amber" className="!right-[-34px]" />
+        <NodeHandle id="invalid" tone="amber" className="!-right-2" />
       </div>
     </>
+  );
+
+  const renderDelay = () => (
+    <div className="border-t border-b border-slate-200/80 bg-white/90 px-5 py-5">
+      <div className="mb-4 text-center text-[11px] font-black uppercase tracking-widest text-slate-400">
+        Tempo de espera
+      </div>
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          value={config.duration || '1'}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => updateConfig({ duration: event.target.value })}
+          className="nodrag nopan h-11 w-20 rounded-xl border border-slate-200 bg-white text-center text-lg font-black text-slate-800 outline-none focus:border-amber-400 focus:ring-4 focus:ring-amber-50"
+        />
+        <select
+          value={config.unit || 'minutes'}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => updateConfig({ unit: event.target.value })}
+          className="nodrag nopan h-11 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none focus:border-amber-400"
+        >
+          <option value="minutes">Minuto(s)</option>
+          <option value="hours">Hora(s)</option>
+          <option value="days">Dia(s)</option>
+        </select>
+      </div>
+      <p className="mt-4 rounded-xl bg-amber-50 p-3 text-center text-[11px] font-semibold text-amber-700">
+        A automacao ficara pausada por este periodo antes de prosseguir.
+      </p>
+    </div>
   );
 
   const renderCopyCode = () => (
@@ -485,6 +897,12 @@ export default function FlowNodeCard({ id, data, selected }) {
 
   const renderActionButtons = () => (
     <>
+      {/* Preview de midia para Botoes de Acao */}
+      {(config.image_ready || config.video_ready || config.image_uploading || config.video_uploading) && (
+        <div className="bg-white">
+          {renderMediaPreview()}
+        </div>
+      )}
       <div className="border-t border-b border-slate-200/80 bg-white/90 px-5 py-4">
         <div className="mb-4 text-center text-[12px] font-semibold italic tracking-wide text-slate-300">
           Digite sua mensagem abaixo
@@ -579,14 +997,51 @@ export default function FlowNodeCard({ id, data, selected }) {
   );
 
   const renderSimpleConfig = () => {
-    if (isStart) {
-      return (
-        <div className="border-t border-b border-slate-200/80 px-5 py-4">
-          <input value={config.message || 'Entrada principal da automacao.'} onClick={(event) => event.stopPropagation()} onChange={(event) => updateConfig({ message: event.target.value })} className="nodrag nopan h-10 w-full rounded-md border border-slate-200 px-3 text-xs font-semibold text-slate-600 outline-none focus:border-cyan-300" />
-        </div>
-      );
-    }
     if (isCondition) {
+      if (isValidationCondition) {
+        const maxRetries = config.max_retries === '' || config.max_retries === '0' ? 'infinito' : (config.max_retries || '3');
+
+        return (
+          <div className="space-y-3 border-t border-b border-slate-200/80 px-5 py-4">
+            <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+              <div className="text-[10px] font-black uppercase tracking-widest text-amber-600">Regra</div>
+              <div className="mt-1 flex items-center gap-2 text-xs font-bold text-slate-600">
+                {config.validation_type === 'email'
+                  ? 'E-mail'
+                  : config.validation_type === 'number'
+                    ? 'Apenas numeros'
+                    : config.validation_type === 'number_length'
+                      ? `Numero com ${config.exact_length || '?'} digitos`
+                      : 'CPF ou CNPJ'}
+                <span className="text-slate-300">·</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={config.max_retries ?? '3'}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) => updateConfig({ max_retries: event.target.value })}
+                  className="nodrag nopan h-7 w-12 rounded-md border border-amber-200 bg-white text-center text-xs font-black text-amber-700 outline-none focus:border-amber-400"
+                  title="Limite de tentativas. Use 0 para infinito."
+                />
+                <span className="text-slate-400">{maxRetries === 'infinito' ? 'tentativas' : 'tent.'}</span>
+              </div>
+            </div>
+            <div className="relative flex items-center justify-between rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">
+              {config.true_label || 'Valido'}
+              <NodeHandle id="true" tone="emerald" className="!right-[-28px]" />
+            </div>
+            <div className="relative flex items-center justify-between rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">
+              {config.retry_label || 'Tentar novamente'}
+              <NodeHandle id="retry" tone="amber" className="!right-[-28px]" />
+            </div>
+            <div className="relative flex items-center justify-between rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
+              {config.false_label || 'Falha'}
+              <NodeHandle id="false" tone="rose" className="!right-[-28px]" />
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div className="space-y-3 border-t border-b border-slate-200/80 px-5 py-4">
           <input value={config.field || ''} onClick={(event) => event.stopPropagation()} onChange={(event) => updateConfig({ field: event.target.value })} placeholder="Campo" className="nodrag nopan h-10 w-full rounded-md border border-slate-200 px-3 text-sm font-semibold outline-none" />
@@ -610,9 +1065,112 @@ export default function FlowNodeCard({ id, data, selected }) {
   };
 
   const renderBody = () => {
+    if (node.type === 'trigger_start') {
+      const triggerLabel = localTriggerType === 'keyword'
+        ? `Dispara com a palavra: "${localKeyword || '...'}"` 
+        : 'Dispara com Qualquer Interacao.';
+
+      return (
+        <div className="border-t border-slate-200/80 px-5 py-4 space-y-3">
+          {!isTriggerEditing ? (
+            <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3">
+              <div className="text-[10px] font-black uppercase text-emerald-600 mb-1">Gatilho Configurado</div>
+              <div className="text-xs font-semibold text-slate-600">{triggerLabel}</div>
+              {localWorkingHours && (
+                <div className="mt-1.5 flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
+                  <Clock3 className="h-3 w-3" /> Horario comercial ativo
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setIsTriggerEditing(true); }}
+                className="mt-3 nodrag nopan h-8 w-full rounded-lg border border-emerald-200 bg-white text-[10px] font-black uppercase text-emerald-600 hover:bg-emerald-50 transition-all"
+              >
+                Editar Gatilho
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 mb-1.5 block">Tipo de Gatilho</label>
+                <select
+                  value={localTriggerType}
+                  onChange={(e) => { e.stopPropagation(); setLocalTriggerType(e.target.value); }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="nodrag nopan w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs font-semibold text-slate-700 outline-none"
+                >
+                  <option value="any_interaction">Qualquer Interacao</option>
+                  <option value="keyword">Palavra-chave</option>
+                </select>
+              </div>
+
+              {localTriggerType === 'keyword' && (
+                <div>
+                  <label className="text-[10px] font-black uppercase text-slate-400 mb-1.5 block">Palavra-chave</label>
+                  <input
+                    type="text"
+                    value={localKeyword}
+                    onChange={(e) => { e.stopPropagation(); setLocalKeyword(e.target.value); }}
+                    onClick={(e) => e.stopPropagation()}
+                    placeholder="Ex: oi, ajuda"
+                    className="nodrag nopan w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-none focus:border-cyan-300 focus:bg-white"
+                  />
+                </div>
+              )}
+
+              <label className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-500 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={localWorkingHours}
+                  onChange={(e) => { e.stopPropagation(); setLocalWorkingHours(e.target.checked); }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="nodrag nopan h-3.5 w-3.5 rounded border-slate-300"
+                />
+                Horario Comercial
+              </label>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  updateConfig({
+                    trigger_type: localTriggerType,
+                    keyword: localKeyword,
+                    use_working_hours: localWorkingHours
+                  });
+                  setIsTriggerEditing(false);
+                }}
+                className="nodrag nopan h-9 w-full rounded-lg bg-emerald-600 text-[10px] font-black uppercase text-white hover:bg-emerald-700 shadow-lg shadow-emerald-600/20 transition-all"
+              >
+                Confirmar
+              </button>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     if (isLink) return renderLink();
-    if (isMedia) return renderMedia();
+    if (isMedia) {
+      return (
+        <>
+          {renderMediaPreview()}
+          {renderMessageInput({ placeholder: 'Legenda da mídia (opcional)' })}
+          <label className="flex items-center gap-2 border-b border-slate-200/80 px-5 py-3 text-xs font-semibold italic text-slate-500">
+            <input type="checkbox" checked={Boolean(config.mark_as_forwarded)} onClick={(event) => event.stopPropagation()} onChange={(event) => updateConfig({ mark_as_forwarded: event.target.checked })} className="nodrag nopan h-4 w-4 rounded border-slate-300" />
+            Marcar como encaminhada
+          </label>
+          <FooterStatus
+            accent="violet"
+            label={node.type === 'send_audio' ? 'Status gravando' : 'Status digitando'}
+            value={node.type === 'send_audio' ? config.recording_seconds : config.typing_seconds}
+            onChange={(val) => updateConfig(node.type === 'send_audio' ? { recording_seconds: val } : { typing_seconds: val })}
+          />
+        </>
+      );
+    }
     if (isOptions) return renderOptions();
+    if (isDelay) return renderDelay();
     if (isCopyCode) return renderCopyCode();
     if (isActionButtons) return renderActionButtons();
     if (isExternalCall) return renderExternalCall();
@@ -628,6 +1186,7 @@ export default function FlowNodeCard({ id, data, selected }) {
         </>
       );
     }
+
     return renderSimpleConfig();
   };
 
@@ -635,7 +1194,7 @@ export default function FlowNodeCard({ id, data, selected }) {
     <div
       onClick={() => onSelect(id)}
       className={cn(
-        'group relative w-[270px] rounded-lg border bg-white shadow-[0_14px_35px_rgba(15,23,42,0.12)] transition-all',
+        'group relative w-[320px] rounded-lg border bg-white shadow-[0_14px_35px_rgba(15,23,42,0.12)] transition-all',
         selected ? 'border-cyan-400 ring-2 ring-cyan-200' : 'border-cyan-300'
       )}
     >
@@ -653,25 +1212,11 @@ export default function FlowNodeCard({ id, data, selected }) {
       <NodeHandle type="target" position={Position.Left} className="!left-[-9px]" />
       <NodeHandle type="target" position={Position.Top} className="!top-[-9px]" />
 
-      <div className={cn('rounded-t-lg px-4 py-3', isMedia ? 'bg-violet-500' : isExternalCall ? 'bg-sky-500' : isActionButtons || isCopyCode ? 'bg-slate-700' : 'bg-[#25c9bc]')}>
-        <div className="flex gap-2">
-          <Stat label="Executando" value={node.metrics?.running ?? 0} />
-          <Stat label="Enviados" value={node.metrics?.sent ?? 0} />
-          {(isOptions || isActionButtons) && <Stat label="Clicado" value={`${node.metrics?.clicked ?? 0}%`} />}
-        </div>
-      </div>
-
-      <div className="flex items-center gap-3 border-b border-slate-200/80 px-5 py-4">
-        <div className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full', meta.iconWrapClass || 'bg-cyan-100 text-cyan-600')}>
-          <Icon className="h-5 w-5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-base font-black text-slate-600">{meta.title}</div>
-          <div className="text-sm font-semibold text-cyan-500">{meta.group}</div>
-        </div>
-        <div className="flex flex-col gap-2 text-slate-500">
-          <CircleHelp className="h-5 w-5" />
-          <Play className="h-5 w-5 fill-current" />
+      <div className={cn('rounded-t-lg px-4 py-2', isMedia ? 'bg-violet-500' : isExternalCall ? 'bg-sky-500' : 'bg-[#4a7285]')}>
+        <div className="flex gap-1.5">
+          <Stat label="Exec." value={node.metrics?.running ?? 0} />
+          <Stat label="Env." value={node.metrics?.sent ?? 0} />
+          {(isOptions || isActionButtons) && <Stat label="Clic." value={`${node.metrics?.clicked ?? 0}%`} />}
         </div>
       </div>
 
@@ -694,6 +1239,15 @@ export default function FlowNodeCard({ id, data, selected }) {
           + Adicionar proximo bloco
         </button>
       </div>
+
+      {/* Sensor de arquivos global */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        onChange={chooseFile}
+        className="hidden"
+        onClick={(e) => e.stopPropagation()}
+      />
     </div>
   );
 }

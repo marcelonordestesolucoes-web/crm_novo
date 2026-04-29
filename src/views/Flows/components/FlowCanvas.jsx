@@ -1,16 +1,17 @@
-import React from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   Background,
   BackgroundVariant,
   BaseEdge,
   Controls,
   EdgeLabelRenderer,
-  getSmoothStepPath,
+  getBezierPath,
   MarkerType,
   MiniMap,
   Panel,
   ReactFlow,
-  ReactFlowProvider
+  ReactFlowProvider,
+  useReactFlow
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Plus, Trash2 } from 'lucide-react';
@@ -33,7 +34,7 @@ function DeletableEdge({
   style,
   data
 }) {
-  const [edgePath, labelX, labelY] = getSmoothStepPath({
+  const [edgePath] = getBezierPath({
     sourceX,
     sourceY,
     sourcePosition,
@@ -41,31 +42,64 @@ function DeletableEdge({
     targetY,
     targetPosition
   });
-  const fallbackLabelX = sourceX + ((targetX - sourceX) * 0.62);
-  const fallbackLabelY = sourceY + ((targetY - sourceY) * 0.62);
-  const deleteButtonX = Number.isFinite(labelX) ? labelX : fallbackLabelX;
-  const deleteButtonY = Number.isFinite(labelY) ? labelY : fallbackLabelY;
+
+  const [hoverPos, setHoverPos] = useState(null);
+  const timeoutRef = useRef(null);
+  const { screenToFlowPosition } = useReactFlow();
+
+  const handleMouseMove = useCallback((event) => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    const pos = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    setHoverPos(pos);
+  }, [screenToFlowPosition]);
+
+  const handleMouseLeave = useCallback(() => {
+    timeoutRef.current = setTimeout(() => {
+      setHoverPos(null);
+    }, 150);
+  }, []);
+
+  const handleButtonEnter = useCallback(() => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+  }, []);
 
   return (
     <>
       <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={style} />
-      <EdgeLabelRenderer>
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            data?.onDelete?.(data.edge);
-          }}
-          className="nodrag nopan absolute z-[1000] flex h-8 w-8 items-center justify-center rounded-full border border-red-200 bg-white text-red-500 shadow-lg shadow-red-500/10 transition-all hover:scale-110 hover:border-red-300 hover:bg-red-50"
-          style={{
-            transform: `translate(-50%, -50%) translate(${deleteButtonX}px, ${deleteButtonY}px)`,
-            pointerEvents: 'all'
-          }}
-          title="Remover ligacao"
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
-      </EdgeLabelRenderer>
+      {/* Caminho invisível para capturar os eventos do mouse ao longo de toda a linha */}
+      <path
+        d={edgePath}
+        fill="none"
+        strokeOpacity={0}
+        strokeWidth={24}
+        className="react-flow__edge-interaction cursor-pointer"
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+        onMouseEnter={handleMouseMove}
+      />
+      
+      {hoverPos && (
+        <EdgeLabelRenderer>
+          <button
+            type="button"
+            onMouseEnter={handleButtonEnter}
+            onMouseLeave={handleMouseLeave}
+            onClick={(event) => {
+              event.stopPropagation();
+              data?.onDelete?.(data.edge);
+            }}
+            className="nodrag nopan absolute z-[1000] flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-red-200 bg-white text-red-500 shadow-lg shadow-red-500/10 transition-transform hover:scale-110 hover:border-red-300 hover:bg-red-50"
+            style={{
+              left: `${hoverPos.x}px`,
+              top: `${hoverPos.y}px`,
+              pointerEvents: 'all'
+            }}
+            title="Remover ligacao"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </EdgeLabelRenderer>
+      )}
     </>
   );
 }
@@ -76,6 +110,7 @@ const edgeTypes = {
 
 function toneFromHandle(handle) {
   if (handle === 'true') return 'true';
+  if (handle === 'retry') return 'retry';
   if (handle === 'false') return 'false';
   return 'default';
 }
@@ -100,13 +135,13 @@ function buildReactFlowEdges(edges = [], onDeleteEdge) {
         type: MarkerType.ArrowClosed,
         width: 16,
         height: 16,
-        color: tone === 'true' ? '#10b981' : tone === 'false' ? '#f43f5e' : '#335cff'
+        color: tone === 'true' ? '#10b981' : tone === 'retry' ? '#f59e0b' : tone === 'false' ? '#f43f5e' : '#335cff'
       },
       style: {
         strokeWidth: tone === 'default' ? 2.25 : 2.5,
-        stroke: tone === 'true' ? '#10b981' : tone === 'false' ? '#f43f5e' : '#335cff'
+        stroke: tone === 'true' ? '#10b981' : tone === 'retry' ? '#f59e0b' : tone === 'false' ? '#f43f5e' : '#335cff'
       },
-      label: tone === 'true' ? 'Sim' : tone === 'false' ? 'Não' : ''
+      label: tone === 'true' ? 'Valido' : tone === 'retry' ? 'Tentar' : tone === 'false' ? 'Falha' : ''
     };
   });
 }

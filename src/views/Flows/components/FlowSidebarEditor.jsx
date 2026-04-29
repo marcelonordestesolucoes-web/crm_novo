@@ -645,6 +645,44 @@ export default function FlowSidebarEditor({
           </>
         )}
 
+        {(selectedNode.type === 'condition_validation' || selectedNode.type === 'action_validation') && (
+          <>
+            <SelectInput
+              label="Regra de validacao"
+              value={config.validation_type || 'cpf_cnpj'}
+              onChange={(value) => update('validation_type', value)}
+              options={[
+                { value: 'cpf_cnpj', label: 'CPF ou CNPJ' },
+                { value: 'email', label: 'Formato de E-mail' },
+                { value: 'number', label: 'Apenas Numeros' },
+                { value: 'number_length', label: 'Numeros (Tamanho Fixo)' }
+              ]}
+            />
+            {config.validation_type === 'number_length' && (
+              <TextInput
+                label="Quantidade exata de caracteres"
+                value={config.exact_length || ''}
+                onChange={(value) => update('exact_length', value)}
+                placeholder="Ex.: 4"
+              />
+            )}
+            <TextInput
+              label="Limite de tentativas"
+              value={config.max_retries || '3'}
+              onChange={(value) => update('max_retries', value)}
+              placeholder="Ex.: 3 (Deixe 0 para infinito)"
+            />
+            <div className="rounded-2xl border border-amber-200/50 bg-amber-50/50 p-4">
+              <SectionTitle>Comportamento</SectionTitle>
+              <ul className="list-disc pl-4 text-xs font-semibold text-slate-500 space-y-2">
+                <li><b className="text-emerald-600">Verdadeiro:</b> Formato correto. Zera o contador e avanca.</li>
+                <li><b className="text-amber-600">Tentar N.:</b> Formato invalido. Contador +1. (Ligue de volta na pergunta).</li>
+                <li><b className="text-rose-600">Falha:</b> Limite excedido. (Ligue em humano ou erro).</li>
+              </ul>
+            </div>
+          </>
+        )}
+
         {selectedNode.type === 'condition_business_hours' && (
           <>
             <TextInput
